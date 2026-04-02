@@ -63,7 +63,7 @@ export default function DailyChallenge() {
 
     // Load questions from MongoDB
     try {
-      const res = await fetch(`/api/questions/daily?count=${QUESTIONS_COUNT}`)
+      const res = await fetch(`/api/questions?type=daily&count=${QUESTIONS_COUNT}`)
       const data = await res.json()
       if (data.success && data.questions?.length >= QUESTIONS_COUNT) {
         setQuestions(data.questions)
