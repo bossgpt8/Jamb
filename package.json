@@ -1,0 +1,13 @@
+{
+  "name": "jambgenius",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "iconv-lite": "^0.7.0",
+    "mongoose": "^9.3.3"
+  }
+}

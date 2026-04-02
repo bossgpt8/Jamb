@@ -1,0 +1,104 @@
+/* Import Inter font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.animate-slide-down { animation: slide-down 0.25s ease-out; }
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.93); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.animate-scale-in { animation: scale-in 0.2s ease-out; }
+
+/* Bottom navigation padding so content isn't hidden behind nav */
+.has-bottom-nav {
+  padding-bottom: 70px;
+}
+
+/* Bottom Navigation */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 65px;
+  background: white;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: stretch;
+  z-index: 1000;
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+}
+
+.bottom-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  padding: 8px 4px;
+}
+
+.bottom-nav-item:hover {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.bottom-nav-item.active {
+  color: #2563eb;
+}
+
+.bottom-nav-item .nav-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.bottom-nav-item .nav-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.bottom-nav-item.active .nav-icon,
+.bottom-nav-item.active .nav-label {
+  color: #2563eb;
+}
+
+/* Exam tab active state - orange */
+.bottom-nav-item.exam-active {
+  color: #f97316;
+}
+.bottom-nav-item.exam-active .nav-icon,
+.bottom-nav-item.exam-active .nav-label {
+  color: #f97316;
+}
+
+/* Page loading animation */
+.page-fade-in {
+  animation: pageFadeIn 0.2s ease-in-out;
+}
+
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Font */
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+}

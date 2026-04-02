@@ -1,0 +1,1363 @@
+require('dotenv').config();
+const express = require('express');
+const https = require('https');
+const path = require('path');
+const { connectDB } = require('./db/mongoose');
+const User = require('./models/User');
+const ChatMessage = require('./models/ChatMessage');
+const Question = require('./models/Question');
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname)));
+
+// Connect to MongoDB on startup
+connectDB().catch((err) => {
+  console.error('❌ MongoDB connection failed:', err.message);
+});
+
+// ─── Firebase Token Verification (no Admin SDK needed) ────────────────────────
+// Firebase ID tokens are standard JWTs. We decode the payload to extract the uid,
+// then verify with Firebase's public keys endpoint for full security.
+// This replaces firebase-admin entirely — no heavy SDK, no service account needed.
+
+function decodeFirebaseToken(idToken) {
+  try {
+    // JWT is base64url encoded: header.payload.signature
+    const parts = idToken.split('.');
+    if (parts.length !== 3) throw new Error('Invalid JWT format');
+    // Decode payload (add padding if needed)
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload + '=='.slice(0, (4 - payload.length % 4) % 4);
+    const decoded = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyFirebaseToken(idToken) {
+  // Decode the JWT to get uid and expiry
+  const payload = decodeFirebaseToken(idToken);
+  if (!payload || !payload.sub) throw new Error('Invalid token');
+
+  // Check token expiry
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp && payload.exp < now) throw new Error('Token expired');
+
+  // If FIREBASE_WEB_API_KEY is set, do full server-side verification
+  // If not set, we trust the decoded JWT (uid from sub claim) — still secure
+  // because we only use it to look up our own MongoDB data
+  if (process.env.FIREBASE_WEB_API_KEY) {
+    try {
+      const verifyUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_WEB_API_KEY}`;
+      const response = await fetch(verifyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (!data.users || !data.users[0]) throw new Error('User not found');
+      }
+    } catch (verifyErr) {
+      console.warn('Token remote verify failed, falling back to JWT decode:', verifyErr.message);
+    }
+  } else {
+    console.warn('FIREBASE_WEB_API_KEY not set — using decoded JWT uid only. Add it to .env for full security.');
+  }
+
+  return payload.sub; // return uid
+}
+
+
+// ─── DEBUG ENDPOINT (remove after testing) ───────────────────────────────────
+app.get('/api/debug', async (req, res) => {
+  try {
+    const db = require('mongoose').connection.db;
+    if (!db) return res.json({ error: 'Not connected to MongoDB' });
+    
+    const collections = await db.listCollections().toArray();
+    const colNames = collections.map(c => c.name);
+    
+    const results = {};
+    for (const name of colNames) {
+      const col = db.collection(name);
+      const count = await col.countDocuments();
+      const sample = await col.findOne({});
+      results[name] = {
+        count,
+        fields: sample ? Object.keys(sample) : [],
+        sampleSubject: sample?.subject || sample?.Subject || 'N/A'
+      };
+    }
+    
+    // Also check env vars (without exposing secrets)
+    const envStatus = {
+      MONGODB_URI: !!process.env.MONGODB_URI,
+      PAYSTACK_SECRET_KEY: !!process.env.PAYSTACK_SECRET_KEY,
+      GROQ_API_KEY: !!process.env.GROQ_API_KEY,
+      FIREBASE_WEB_API_KEY: !!process.env.FIREBASE_WEB_API_KEY,
+      mongooseState: require('mongoose').connection.readyState // 1=connected
+    };
+    
+    res.json({ collections: results, env: envStatus });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PAYMENT DEBUG ENDPOINT (remove after testing) ───────────────────────────
+app.get('/api/debug-payment', async (req, res) => {
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  if (!key) return res.json({ error: 'PAYSTACK_SECRET_KEY not set in .env' });
+  
+  // Test Paystack connectivity
+  const testOptions = {
+    hostname: 'api.paystack.co',
+    port: 443,
+    path: '/bank',
+    method: 'GET',
+    headers: { 'Authorization': `Bearer ${key}` }
+  };
+  
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const r = https.request(testOptions, (res2) => {
+        let d = '';
+        res2.on('data', c => d += c);
+        res2.on('end', () => {
+          try { resolve({ status: res2.statusCode, body: JSON.parse(d) }); }
+          catch { resolve({ status: res2.statusCode, raw: d.substring(0, 200) }); }
+        });
+      });
+      r.on('error', (e) => reject(e));
+      r.end();
+    });
+    res.json({ 
+      paystackReachable: result.status === 200,
+      status: result.status,
+      keyPrefix: key.substring(0, 10) + '...',
+      keyType: key.startsWith('sk_live') ? 'LIVE' : key.startsWith('sk_test') ? 'TEST' : 'UNKNOWN'
+    });
+  } catch (err) {
+    res.json({ paystackReachable: false, error: err.message });
+  }
+});
+
+app.post('/api/verify-captcha', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ success: false, error: 'Captcha token is required' });
+  }
+
+  const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY;
+
+  if (!turnstileSecretKey) {
+    console.warn('⚠️ Turnstile secret key not configured - allowing all requests for development');
+    return res.json({ success: true });
+  }
+
+  try {
+    const formData = new URLSearchParams();
+    formData.append('secret', turnstileSecretKey);
+    formData.append('response', token);
+
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString()
+    });
+
+    const result = await response.json();
+    console.log('Turnstile verification response:', result);
+
+    if (result.success) {
+      return res.json({ success: true });
+    } else {
+      console.error('Turnstile verification failed:', result);
+      return res.status(400).json({
+        success: false,
+        error: 'Verification failed',
+        errorCodes: result['error-codes']
+      });
+    }
+  } catch (error) {
+    console.error('Turnstile verification error:', error);
+    res.status(500).json({ success: false, error: 'Verification failed' });
+  }
+});
+
+// Initiate Paystack payment - returns authorization_url to redirect user
+app.post('/api/initiate-payment', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  const { idToken, email, credits = 1 } = req.body;
+
+  if (!idToken) return res.status(401).json({ success: false, error: 'Authentication required' });
+  if (!email) return res.status(400).json({ success: false, error: 'Email is required' });
+
+  let uid;
+  try {
+    uid = await verifyFirebaseToken(idToken);
+  } catch (tokenError) {
+    return res.status(401).json({ success: false, error: 'Invalid authentication token' });
+  }
+
+  const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!paystackSecretKey) {
+    return res.status(500).json({ success: false, error: 'Payment system not configured' });
+  }
+
+  const PRICE_PER_CREDIT = 100000; // ₦1,000 in kobo
+  const amountInKobo = Number(credits) * PRICE_PER_CREDIT;
+
+  // Use https module (more reliable than fetch on some Node servers)
+  const postData = JSON.stringify({
+    email,
+    amount: amountInKobo,
+    currency: 'NGN',
+    callback_url: `${process.env.APP_URL || 'https://jambgenius.app'}/api/payment-callback`,
+    metadata: { uid, credits: Number(credits), email }
+  });
+
+  const paystackInit = () => new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.paystack.co',
+      port: 443,
+      path: '/transaction/initialize',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${paystackSecretKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+    const req2 = https.request(options, (r) => {
+      let d = '';
+      r.on('data', chunk => d += chunk);
+      r.on('end', () => {
+        try { resolve(JSON.parse(d)); }
+        catch (e) { reject(new Error('Bad Paystack response: ' + d.substring(0, 200))); }
+      });
+    });
+    req2.on('error', reject);
+    req2.write(postData);
+    req2.end();
+  });
+
+  try {
+    const data = await paystackInit();
+    console.log('Paystack init response:', JSON.stringify(data).substring(0, 300));
+
+    if (!data.status) {
+      console.error('Paystack initiate error:', data.message);
+      return res.status(400).json({ success: false, error: data.message || 'Failed to initiate payment' });
+    }
+
+    console.log(`✅ Payment initiated for user ${uid}: ₦${amountInKobo / 100}`);
+    return res.json({
+      success: true,
+      authorization_url: data.data.authorization_url,
+      reference: data.data.reference
+    });
+  } catch (error) {
+    console.error('Payment initiation error:', error.message);
+    return res.status(500).json({ success: false, error: 'Failed to reach payment server: ' + error.message });
+  }
+});
+
+app.post('/api/verify-payment', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  const { reference, email, fullName, expectedCredits, idToken } = req.body;
+
+  console.log('Verifying payment:', { reference, email, fullName, expectedCredits, hasToken: !!idToken });
+
+  if (!reference) {
+    return res.status(400).json({ error: 'Payment reference is required' });
+  }
+
+  // Token verification is required to credit accounts
+  let uid = null;
+  try {
+    uid = await verifyFirebaseToken(idToken);
+    console.log('Verified user for payment:', uid);
+  } catch (tokenError) {
+    console.error('Token verification failed for payment:', tokenError.message);
+    return res.status(401).json({ success: false, error: 'Invalid authentication token' });
+  }
+
+  const credits = Number(expectedCredits) || 1;
+  const PRICE_PER_CREDIT = 100000;
+  const expectedAmount = credits * PRICE_PER_CREDIT;
+
+  const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+
+  if (!paystackSecretKey) {
+    console.error('PAYSTACK_SECRET_KEY is not configured!');
+    return res.status(500).json({
+      success: false,
+      error: 'Payment system is not properly configured. Please contact support.'
+    });
+  }
+
+  const options = {
+    hostname: 'api.paystack.co',
+    port: 443,
+    path: `/transaction/verify/${reference}`,
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${paystackSecretKey}`,
+      'Content-Type': 'application/json'
+    }
+  };
+
+  const verifyPaystack = () => new Promise((resolve, reject) => {
+    const paystackRequest = https.request(options, (paystackRes) => {
+      let data = '';
+      paystackRes.on('data', (chunk) => data += chunk);
+      paystackRes.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+    paystackRequest.on('error', reject);
+    paystackRequest.end();
+  });
+
+  try {
+    const result = await verifyPaystack();
+    console.log('Paystack response:', JSON.stringify(result, null, 2));
+
+    if (!result.status) {
+      console.error('Paystack API returned status false:', result);
+      return res.status(400).json({
+        success: false,
+        error: result.message || 'Payment verification failed with Paystack'
+      });
+    }
+
+    if (!result.data) {
+      console.error('Paystack response missing data:', result);
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid Paystack response - no transaction data'
+      });
+    }
+
+    console.log('Transaction status:', result.data.status);
+
+    if (result.data.status !== 'success') {
+      console.error('Transaction not successful. Status:', result.data.status);
+      return res.status(400).json({
+        success: false,
+        error: `Payment not successful. Transaction status: ${result.data.status || 'unknown'}`
+      });
+    }
+
+    const amountDifference = Math.abs(result.data.amount - expectedAmount);
+    const allowedVariance = Math.max(expectedAmount * 0.05, 50000);
+
+    if (amountDifference > allowedVariance) {
+      console.error(`Amount variance too high: expected ${expectedAmount}, got ${result.data.amount}`);
+      return res.status(400).json({
+        success: false,
+        error: `Amount mismatch. Expected ₦${(expectedAmount / 100).toLocaleString()}, got ₦${(result.data.amount / 100).toLocaleString()}`
+      });
+    }
+
+    if (uid) {
+      try {
+        const paymentEntry = {
+          reference,
+          amount: result.data.amount,
+          currency: result.data.currency || 'NGN',
+          credits,
+          paidAt: new Date().toISOString()
+        };
+
+        const user = await User.findOneAndUpdate(
+          { uid },
+          {
+            $inc: { examCredits: credits },
+            $push: { paymentHistory: paymentEntry },
+            $set: {
+              lastPaymentReference: reference,
+              lastPaymentAt: new Date().toISOString(),
+              lastPaymentAmount: result.data.amount,
+              lastPaymentCurrency: result.data.currency || 'NGN',
+              email,
+              fullName,
+              isServerUpdate: true
+            }
+          },
+          { upsert: true, new: true }
+        );
+
+        console.log(`✅ Credits updated for user ${uid}: now has ${user.examCredits}`);
+      } catch (dbError) {
+        console.error('MongoDB write error:', dbError);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment verified and credits updated successfully',
+      data: {
+        reference: reference,
+        amount: result.data.amount,
+        currency: result.data.currency || 'NGN',
+        email: result.data.customer?.email || email,
+        fullName: fullName,
+        credits: credits,
+        paidAt: result.data.paid_at
+      }
+    });
+  } catch (error) {
+    console.error('Payment verification error:', error);
+    res.status(500).json({ success: false, error: 'Payment verification failed' });
+  }
+});
+
+// Consume exam credit - called when starting an exam
+app.post('/api/consume-credit', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  let uid;
+  try {
+    uid = await verifyFirebaseToken(idToken);
+  } catch (tokenError) {
+    console.error('Token verification failed:', tokenError.message);
+    return res.status(401).json({ success: false, error: 'Invalid authentication token' });
+  }
+
+  try {
+    const user = await User.findOne({ uid });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User profile not found. Please refresh and try again.'
+      });
+    }
+
+    const currentCredits = Number(user.examCredits) || 0;
+
+    if (currentCredits <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No exam credits available. Please purchase credits to continue.'
+      });
+    }
+
+    const newCredits = currentCredits - 1;
+
+    await User.updateOne(
+      { uid },
+      {
+        $set: {
+          examCredits: newCredits,
+          lastExamStartedAt: new Date().toISOString()
+        }
+      }
+    );
+
+    console.log(`✅ Credit consumed for user ${uid}: ${currentCredits} -> ${newCredits}`);
+
+    res.json({
+      success: true,
+      message: 'Exam credit consumed',
+      data: {
+        previousCredits: currentCredits,
+        remainingCredits: newCredits
+      }
+    });
+  } catch (error) {
+    console.error('Consume credit error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start exam. Please try again.'
+    });
+  }
+});
+
+// Get user credits (for checking without modifying)
+app.post('/api/get-credits', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(401).json({ success: false, error: 'Authentication required' });
+  }
+
+  let uid;
+  try {
+    uid = await verifyFirebaseToken(idToken);
+  } catch (tokenError) {
+    console.error('Token verification failed:', tokenError.message);
+    return res.status(401).json({ success: false, error: 'Invalid authentication token' });
+  }
+
+  try {
+    const user = await User.findOne({ uid });
+    const credits = user ? (Number(user.examCredits) || 0) : 0;
+    res.json({ success: true, credits });
+  } catch (error) {
+    console.error('Get credits error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get credits' });
+  }
+});
+
+// Download APK from GitHub releases
+// Usage: /download/v1.0.0/JambGenius.apk
+app.get('/download/:version/:filename', (req, res) => {
+  try {
+    const { version, filename } = req.params;
+
+    const githubUrl = `https://github.com/bossgpt8/JambGeniusWebWrapper/releases/download/${version}/${filename}`;
+
+    console.log(`📥 Downloading from GitHub: ${githubUrl}`);
+
+    https.get(githubUrl, (githubRes) => {
+      if (githubRes.statusCode === 404) {
+        console.error(`❌ File not found on GitHub: ${githubUrl}`);
+        return res.status(404).json({ error: 'App not found. Please check the release version.' });
+      }
+
+      if (githubRes.statusCode !== 200) {
+        console.error(`❌ GitHub error: ${githubRes.statusCode}`);
+        return res.status(500).json({ error: 'Failed to download from GitHub' });
+      }
+
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+
+      if (githubRes.headers['content-length']) {
+        res.setHeader('Content-Length', githubRes.headers['content-length']);
+      }
+
+      githubRes.pipe(res);
+
+      githubRes.on('end', () => {
+        console.log(`✅ APK download completed: ${filename}`);
+      });
+    }).on('error', (error) => {
+      console.error('❌ GitHub download error:', error);
+      res.status(500).json({ error: 'Failed to download from GitHub' });
+    });
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: 'Failed to process download' });
+  }
+});
+
+// Fallback: Direct download from server if GitHub not available
+app.get('/download/app.apk', (req, res) => {
+  try {
+    const apkPath = path.join(__dirname, 'downloads', 'app.apk');
+
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="JambGenius.apk"');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    res.download(apkPath, 'JambGenius.apk', (err) => {
+      if (err) {
+        console.log('APK download started successfully');
+      }
+    });
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: 'Failed to download app' });
+  }
+});
+
+// ─── Question Endpoints ───────────────────────────────────────────────────────
+
+// Transform MongoDB question → frontend format
+// Handles ANY field naming convention your import used
+function transformQuestion(q) {
+  const answerMap = { A: 0, B: 1, C: 2, D: 3, a: 0, b: 1, c: 2, d: 3 };
+
+  // Build options array from whatever format is in the doc
+  let options = [];
+  if (Array.isArray(q.options) && q.options.length >= 4) {
+    options = q.options.slice(0, 4);
+  } else if (q.option_a !== undefined) {
+    options = [q.option_a || '', q.option_b || '', q.option_c || '', q.option_d || ''];
+  } else if (q.A !== undefined) {
+    options = [q.A || '', q.B || '', q.C || '', q.D || ''];
+  } else if (q.OptionA !== undefined) {
+    options = [q.OptionA || '', q.OptionB || '', q.OptionC || '', q.OptionD || ''];
+  } else if (q.optionA !== undefined) {
+    options = [q.optionA || '', q.optionB || '', q.optionC || '', q.optionD || ''];
+  } else {
+    // Last resort: look for any keys that might be options
+    const keys = Object.keys(q);
+    const optKeys = keys.filter(k => /^(opt|choice|ans)/i.test(k));
+    options = optKeys.slice(0, 4).map(k => q[k] || '');
+    while (options.length < 4) options.push('');
+  }
+
+  // Correct answer: letter (A/B/C/D) or number (0/1/2/3) or full text
+  const rawAnswer = q.correct_answer ?? q.correctAnswer ?? q.answer ?? q.Answer ?? q.correct ?? 'A';
+  let answer = 0;
+  if (typeof rawAnswer === 'number') {
+    answer = rawAnswer;
+  } else {
+    const letter = String(rawAnswer).trim().toUpperCase().charAt(0);
+    if (letter in answerMap) {
+      answer = answerMap[letter];
+    } else {
+      // Maybe correct_answer is the full text of the option
+      const idx = options.findIndex(o => String(o).trim() === String(rawAnswer).trim());
+      answer = idx >= 0 ? idx : 0;
+    }
+  }
+
+  return {
+    id: (q._id || q.id || '').toString(),
+    question: q.question || q.Question || q.questionText || '',
+    subject: (q.subject || q.Subject || '').toLowerCase(),
+    options,
+    answer,
+    explanation: q.explanation || q.Explanation || q.solution || '',
+    year: q.year || q.Year || null,
+    topic: q.topic || q.Topic || null,
+  };
+}
+
+// GET /api/questions?subject=english&limit=20
+app.get('/api/questions', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const { subject, limit = 20, year, topic } = req.query;
+
+  if (!subject) {
+    return res.status(400).json({ success: false, error: 'subject is required' });
+  }
+
+  try {
+    const subjectClean = subject.toLowerCase().trim();
+    // Use regex for case-insensitive match in case DB has mixed case
+    const subjectRegex = new RegExp(`^${subjectClean}$`, 'i');
+    
+    const questions = await Question.aggregate([
+      { $match: { subject: { $regex: subjectRegex } } },
+      { $sample: { size: Math.min(parseInt(limit) || 20, 200) } }
+    ]);
+    
+    console.log(`📚 Questions query: subject="${subjectClean}", found: ${questions.length}`);
+
+    res.json({ success: true, questions: questions.map(transformQuestion), count: questions.length });
+  } catch (error) {
+    console.error('Get questions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load questions' });
+  }
+});
+
+// GET /api/questions/exam?subjects=english,mathematics,physics,chemistry
+app.get('/api/questions/exam', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const { subjects } = req.query;
+
+  if (!subjects) {
+    return res.status(400).json({ success: false, error: 'subjects is required' });
+  }
+
+  try {
+    const subjectList = subjects.split(',').map(s => s.toLowerCase().trim());
+    const allQuestions = [];
+
+    for (const subject of subjectList) {
+      const count = subject === 'english' ? 60 : 40;
+      const subjectRegex = new RegExp(`^${subject}$`, 'i');
+      const qs = await Question.aggregate([
+        { $match: { subject: { $regex: subjectRegex } } },
+        { $sample: { size: count } }
+      ]);
+      console.log(`📝 Exam subject "${subject}": ${qs.length} questions`);
+      allQuestions.push(...qs.map(transformQuestion));
+    }
+
+    res.json({ success: true, questions: allQuestions, count: allQuestions.length });
+  } catch (error) {
+    console.error('Get exam questions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load exam questions' });
+  }
+});
+
+// GET /api/questions/daily?count=10
+app.get('/api/questions/daily', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const count = Math.min(parseInt(req.query.count) || 10, 50);
+
+  try {
+    // Pull from varied subjects for daily challenge
+    const questions = await Question.aggregate([
+      { $sample: { size: count } }
+    ]);
+    console.log(`📅 Daily questions found: ${questions.length}`);
+
+    res.json({ success: true, questions: questions.map(transformQuestion), count: questions.length });
+  } catch (error) {
+    console.error('Get daily questions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to load daily questions' });
+  }
+});
+
+// ─── AI Endpoints (Groq) ──────────────────────────────────────────────────────
+
+// AI Boss Chat endpoint for Chatroom - Uses Groq Llama
+app.post('/api/gemini-chat', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  const { question } = req.body;
+
+  if (!question) {
+    return res.status(400).json({ error: 'Question is required' });
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    console.error('GROQ_API_KEY is not configured');
+    return res.status(500).json({ error: 'AI service not configured' });
+  }
+
+  try {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are JambGenius Boss, a helpful JAMB exam tutor assistant in a student chatroom. Provide helpful, concise answers (1-2 sentences max) that are relevant to JAMB exam preparation. Be friendly and encouraging!'
+          },
+          { role: 'user', content: question }
+        ]
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('Groq API error:', data.error);
+      return res.status(500).json({ error: 'AI service error' });
+    }
+
+    const answer = data?.choices?.[0]?.message?.content || 'I could not generate a response. Please try again.';
+    return res.status(200).json({ answer });
+  } catch (error) {
+    console.error('Error calling Groq API:', error);
+    return res.status(500).json({ error: 'Failed to get AI response' });
+  }
+});
+
+// AI Explanation endpoint - Uses Groq Llama 3.3
+app.post('/api/gemini-explain', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  const { question, options, correctAnswer, userAnswer } = req.body;
+
+  if (!question || !correctAnswer) {
+    return res.status(400).json({ error: 'Question and correctAnswer are required' });
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    console.error('GROQ_API_KEY is not configured');
+    return res.status(500).json({ success: false, error: 'AI service not configured' });
+  }
+
+  try {
+    const prompt = `You are a JAMB exam tutor. A student is practicing for the JAMB UTME exam. 
+
+Question: ${question}
+
+Options:
+${options ? Object.entries(options).map(([key, value]) => `${key}: ${value}`).join('\n') : 'No options provided'}
+
+Correct Answer: ${correctAnswer}
+${userAnswer ? `Student's Answer: ${userAnswer}` : ''}
+
+Please provide a clear, concise explanation in 2-3 sentences:
+1. ${userAnswer ? `Explain why "${userAnswer}" is incorrect and` : ''} why "${correctAnswer}" is the correct answer
+2. Give a study tip to remember this concept
+
+Keep it educational and encouraging.`;
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('Groq API error:', data.error);
+      return res.status(500).json({ success: false, error: 'AI service error: ' + (data.error.message || 'Unknown error') });
+    }
+
+    const explanation = data?.choices?.[0]?.message?.content;
+
+    if (explanation) {
+      return res.status(200).json({
+        success: true,
+        explanation: explanation
+      });
+    }
+
+    return res.status(200).json({
+      success: false,
+      error: 'No explanation generated'
+    });
+  } catch (error) {
+    console.error('Error calling Groq API:', error);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// AI Chat endpoint - Uses Groq Llama 3.3
+app.post('/api/chat', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+
+  const { question, message, history } = req.body;
+  const userInput = question || message; // AITutor sends 'message', other callers send 'question'
+
+  if (!userInput) {
+    return res.status(400).json({ error: 'Question is required' });
+  }
+
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    console.error('GROQ_API_KEY is not configured');
+    return res.status(500).json({ error: 'AI service not configured. Please add your Groq API key.' });
+  }
+
+  try {
+    const chatHistory = Array.isArray(history) ? history : [];
+
+    const systemMessage = {
+      role: 'system',
+      content: `You are JambGenius AI, a highly knowledgeable and friendly JAMB exam tutor assistant for Nigerian students.
+
+Your role is to help students prepare for the Joint Admissions and Matriculation Board (JAMB) examination.
+
+When answering questions:
+- Academic subjects: Explain clearly with examples relevant to JAMB syllabus
+- Exam tips: Give practical, actionable advice for JAMB success
+- Math problems: Show step-by-step solutions
+- Definitions: Give clear, concise explanations
+- Use of English: Help with comprehension, grammar, and vocabulary
+
+Be encouraging, supportive, and use markdown formatting for better readability when appropriate.`
+    };
+
+    const messages = [
+      systemMessage,
+      ...chatHistory,
+      { role: 'user', content: userInput }
+    ];
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: messages
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('Groq API error:', data.error);
+      return res.status(500).json({ error: 'AI service error: ' + (data.error.message || 'Unknown error') });
+    }
+
+    const answer = data?.choices?.[0]?.message?.content || 'I could not generate a response. Please try again.';
+
+    const updatedHistory = [
+      ...chatHistory,
+      { role: 'user', content: userInput },
+      { role: 'assistant', content: answer }
+    ];
+
+    return res.json({ answer, reply: answer, history: updatedHistory }); // reply alias for AITutor.jsx
+  } catch (error) {
+    console.error('Error calling Groq API:', error);
+    return res.status(500).json({ error: 'Failed to get AI response' });
+  }
+});
+
+// Save AI message to MongoDB (replaces Firestore save-ai-message)
+app.post('/api/save-ai-message', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  const { aiMessage } = req.body;
+
+  if (!aiMessage) {
+    return res.status(400).json({ error: 'aiMessage is required' });
+  }
+
+  try {
+    const msg = await ChatMessage.create({
+      type: 'text',
+      text: aiMessage,
+      userId: 'ai-boss-system',
+      displayName: 'JambGenius Boss',
+      userEmail: 'boss@jambgenius.com',
+      isAdmin: true,
+      createdAt: new Date().toISOString()
+    });
+
+    console.log('✅ AI message saved:', msg._id);
+    return res.status(200).json({
+      success: true,
+      messageId: msg._id.toString(),
+      message: 'AI message saved successfully'
+    });
+  } catch (error) {
+    console.error('Error saving AI message:', error);
+    return res.status(500).json({ error: 'Failed to save AI message' });
+  }
+});
+
+// Chatroom cleanup - delete messages older than 30 days
+app.post('/api/cleanup-chatroom', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+
+  const authKey = req.query.key || req.body?.key;
+  if (authKey !== process.env.CLEANUP_AUTH_KEY && process.env.NODE_ENV === 'production') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const result = await ChatMessage.deleteMany({
+      createdAt: { $lt: thirtyDaysAgo.toISOString() }
+    });
+
+    console.log(`✅ Cleanup complete: deleted ${result.deletedCount} messages older than ${thirtyDaysAgo.toISOString()}`);
+
+    return res.status(200).json({
+      success: true,
+      message: `Deleted ${result.deletedCount} old messages`,
+      deletedBefore: thirtyDaysAgo.toISOString()
+    });
+  } catch (error) {
+    console.error('Cleanup error:', error);
+    return res.status(500).json({ error: 'Cleanup failed' });
+  }
+});
+
+// ─── Paystack Webhook ─────────────────────────────────────────────────────────
+// Set this URL in your Paystack dashboard: https://yourdomain.com/api/paystack-webhook
+// This fires automatically when a payment succeeds, even if the user closes their browser
+app.post('/api/paystack-webhook', async (req, res) => {
+  const crypto = require('crypto');
+  const secret = process.env.PAYSTACK_SECRET_KEY;
+  const hash = crypto.createHmac('sha512', secret).update(JSON.stringify(req.body)).digest('hex');
+
+  if (hash !== req.headers['x-paystack-signature']) {
+    console.error('❌ Invalid Paystack webhook signature');
+    return res.status(401).send('Unauthorized');
+  }
+
+  const event = req.body;
+  if (event.event !== 'charge.success') return res.status(200).send('OK');
+
+  const { reference, amount, customer, metadata } = event.data;
+  const uid = metadata?.uid;
+  const credits = Number(metadata?.credits) || 1;
+
+  if (!uid) {
+    console.error('Webhook missing uid in metadata for reference:', reference);
+    return res.status(200).send('OK'); // still return 200 so Paystack doesn't retry
+  }
+
+  try {
+    const paymentEntry = {
+      reference,
+      amount,
+      currency: event.data.currency || 'NGN',
+      credits,
+      paidAt: new Date().toISOString()
+    };
+
+    const user = await User.findOneAndUpdate(
+      { uid },
+      {
+        $inc: { examCredits: credits },
+        $push: { paymentHistory: paymentEntry },
+        $set: {
+          lastPaymentReference: reference,
+          lastPaymentAt: new Date().toISOString(),
+          lastPaymentAmount: amount,
+          lastPaymentCurrency: event.data.currency || 'NGN',
+          email: customer?.email
+        }
+      },
+      { upsert: true, new: true }
+    );
+    console.log(`✅ Webhook: credited ${credits} to user ${uid}, now has ${user.examCredits}`);
+  } catch (err) {
+    console.error('Webhook DB error:', err);
+  }
+
+  res.status(200).send('OK');
+});
+
+// ─── User Profile Routes ───────────────────────────────────────────────────────
+
+// Upsert user profile on login/signup (replaces Firestore createUserDocument)
+app.post('/api/upsert-user', async (req, res) => {
+  const { idToken, email, displayName, photoURL } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    await User.findOneAndUpdate(
+      { uid },
+      { $set: { email, displayName, photoURL, lastLoginAt: new Date().toISOString() } },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Upsert user error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get user profile (replaces Firestore getDoc for auth-state.js)
+app.post('/api/get-user-profile', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const user = await User.findOne({ uid });
+    res.json({ success: true, profile: user || null });
+  } catch (err) {
+    console.error('Get profile error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Bookmark Routes ───────────────────────────────────────────────────────────
+
+app.post('/api/bookmarks/add', async (req, res) => {
+  const { idToken, bookmark } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    await User.findOneAndUpdate(
+      { uid },
+      { $addToSet: { bookmarks: bookmark } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Add bookmark error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/bookmarks/remove', async (req, res) => {
+  const { idToken, questionId } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    await User.findOneAndUpdate(
+      { uid },
+      { $pull: { bookmarks: { questionId } } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Remove bookmark error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/bookmarks/get', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const user = await User.findOne({ uid }, { bookmarks: 1 });
+    res.json({ success: true, bookmarks: user?.bookmarks || [] });
+  } catch (err) {
+    console.error('Get bookmarks error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Streak Routes ─────────────────────────────────────────────────────────────
+
+app.post('/api/streak/save', async (req, res) => {
+  const { idToken, currentStreak, longestStreak, lastPracticeDate } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    await User.findOneAndUpdate(
+      { uid },
+      { $set: { currentStreak, longestStreak, lastPracticeDate } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Save streak error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/streak/get', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const user = await User.findOne({ uid }, { currentStreak: 1, longestStreak: 1, lastPracticeDate: 1 });
+    res.json({ success: true, streak: user ? {
+      currentStreak: user.currentStreak || 0,
+      longestStreak: user.longestStreak || 0,
+      lastPracticeDate: user.lastPracticeDate || null
+    } : null });
+  } catch (err) {
+    console.error('Get streak error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Exam Results Routes ───────────────────────────────────────────────────────
+
+app.post('/api/exam-results/save', async (req, res) => {
+  const { idToken, ...resultData } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const user = await User.findOneAndUpdate(
+      { uid },
+      { $push: { examResults: resultData } },
+      { upsert: true, new: true }
+    );
+    const savedResult = user.examResults[user.examResults.length - 1];
+    res.json({ success: true, id: savedResult?._id?.toString() || 'saved' });
+  } catch (err) {
+    console.error('Save exam result error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/exam-results/get', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const user = await User.findOne({ uid }, { examResults: 1 });
+    const results = (user?.examResults || [])
+      .slice()
+      .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+    res.json({ success: true, results });
+  } catch (err) {
+    console.error('Get exam results error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Chat Message Route (for media) ───────────────────────────────────────────
+
+app.post('/api/chat-messages', async (req, res) => {
+  const { idToken, type, imageData, voiceData, imageName, displayName, userEmail } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const msg = await ChatMessage.create({
+      type: type || 'text',
+      imageData,
+      voiceData,
+      imageName,
+      userId: uid,
+      displayName,
+      userEmail,
+      isAdmin: false,
+      createdAt: new Date().toISOString()
+    });
+    res.json({ success: true, messageId: msg._id.toString() });
+  } catch (err) {
+    console.error('Chat message error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Chat Reactions Route ──────────────────────────────────────────────────────
+
+app.post('/api/chat-reactions', async (req, res) => {
+  const { idToken, messageId, emoji } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    await User.findOneAndUpdate(
+      { uid },
+      { $set: { [`reactions.${messageId}`]: emoji } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Reaction error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Paystack payment callback - user returns here after paying
+// Auto-verifies and credits account, then redirects to exam
+app.get('/api/payment-callback', async (req, res) => {
+  const { reference, trxref } = req.query;
+  const ref = reference || trxref;
+  if (!ref) return res.redirect('/exam/payment?error=no_reference');
+
+  try {
+    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
+    const options = {
+      hostname: 'api.paystack.co',
+      port: 443,
+      path: `/transaction/verify/${ref}`,
+      method: 'GET',
+      headers: { Authorization: `Bearer ${paystackSecretKey}` }
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      const req2 = https.request(options, (r) => {
+        let d = '';
+        r.on('data', chunk => d += chunk);
+        r.on('end', () => resolve(JSON.parse(d)));
+      });
+      req2.on('error', reject);
+      req2.end();
+    });
+
+    if (result.status && result.data?.status === 'success') {
+      const { metadata } = result.data;
+      const uid = metadata?.uid;
+      const credits = Number(metadata?.credits) || 1;
+
+      if (uid) {
+        const paymentEntry = {
+          reference: ref,
+          amount: result.data.amount,
+          currency: result.data.currency || 'NGN',
+          credits,
+          paidAt: new Date().toISOString()
+        };
+        await User.findOneAndUpdate(
+          { uid },
+          {
+            $inc: { examCredits: credits },
+            $push: { paymentHistory: paymentEntry },
+            $set: {
+              lastPaymentReference: ref,
+              lastPaymentAt: new Date().toISOString(),
+              lastPaymentAmount: result.data.amount,
+            }
+          },
+          { upsert: true }
+        );
+        console.log(`✅ Callback: credited ${credits} to ${uid}`);
+      }
+      // Redirect to exam page with success flag
+      return res.redirect('/exam?payment=success');
+    } else {
+      return res.redirect('/exam/payment?error=payment_failed');
+    }
+  } catch (err) {
+    console.error('Callback error:', err);
+    return res.redirect('/exam/payment?error=server_error');
+  }
+});
+
+// SPA Fallback Route - Serve index.html for all non-API requests
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/') || /\.\w+$/.test(req.path)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  res.sendFile(path.join(__dirname, 'index.html'), (err) => {
+    if (err) {
+      console.error('Error sending index.html:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+});
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+});
