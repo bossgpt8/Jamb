@@ -7,7 +7,7 @@ const STORAGE_KEY = 'jg_chat_messages'
 const NAME_KEY = 'jg_chat_display_name'
 
 // Admin UIDs - add your Firebase UID here to get admin powers
-const ADMIN_UIDS = ['YOUR_ADMIN_UID_HERE']
+const ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2']
 
 const BOSS_SUGGESTIONS = [
   '@boss explain this topic: ',
