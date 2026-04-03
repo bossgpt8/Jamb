@@ -8,6 +8,12 @@ export default function ExamPayment() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(false)
   const [credits, setCredits] = useState(0)
+  const [purchaseCredits, setPurchaseCredits] = useState(1)
+  const PRICE_PER_CREDIT = 1000
+  const MAX_PURCHASE_CREDITS = 10
+
+  const clampCredits = (value) => Math.max(1, Math.min(MAX_PURCHASE_CREDITS, value))
+  const totalAmount = purchaseCredits * PRICE_PER_CREDIT
 
   useEffect(() => {
     document.title = 'Exam Payment - JambGenius'
@@ -35,7 +41,7 @@ export default function ExamPayment() {
       const res = await fetch('/api/initiate-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken, email: user.email, credits: 1 })
+        body: JSON.stringify({ idToken, email: user.email, credits: purchaseCredits })
       })
       const data = await res.json()
       if (data.authorization_url) {
@@ -96,15 +102,53 @@ export default function ExamPayment() {
 
             <h2 className="text-xl font-bold text-gray-900 mb-4">Pay with Paystack</h2>
             <div className="bg-orange-50 border border-orange-200 rounded-xl p-6 mb-6">
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between items-center gap-4">
                 <div>
-                  <p className="font-bold text-gray-900 text-lg">Mock Exam Access</p>
-                  <p className="text-gray-600 text-sm">180 questions • 2 hours • Full JAMB simulation</p>
+                  <p className="font-bold text-gray-900 text-lg">Mock Exam Credits</p>
+                  <p className="text-gray-600 text-sm">1 credit = 1 full mock exam session</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-3xl font-bold text-orange-600">₦1,000</p>
-                  <p className="text-xs text-gray-500">per attempt</p>
+                  <p className="text-3xl font-bold text-orange-600">₦{totalAmount.toLocaleString()}</p>
+                  <p className="text-xs text-gray-500">for {purchaseCredits} credit{purchaseCredits > 1 ? 's' : ''}</p>
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-orange-100 rounded-2xl shadow-sm p-6 mb-6">
+              <div className="text-center mb-5">
+                <h3 className="text-lg font-semibold text-gray-900">Select Number of Credits</h3>
+                <p className="text-sm text-gray-500 mt-1">₦{PRICE_PER_CREDIT.toLocaleString()} each • Each credit unlocks 1 full exam</p>
+              </div>
+
+              <div className="flex items-center justify-center gap-4 sm:gap-6">
+                <button
+                  type="button"
+                  onClick={() => setPurchaseCredits((value) => clampCredits(value - 1))}
+                  className="w-14 h-14 rounded-full bg-gray-200 text-gray-700 text-3xl font-light hover:bg-gray-300 transition-colors flex items-center justify-center"
+                  aria-label="Decrease credits"
+                >
+                  −
+                </button>
+
+                <div className="min-w-[120px] rounded-2xl bg-gradient-to-br from-orange-50 to-red-50 border border-orange-100 px-6 py-4 text-center shadow-inner">
+                  <div className="text-5xl font-extrabold text-gray-900 leading-none">{purchaseCredits}</div>
+                  <div className="mt-1 text-sm text-gray-600">credit{purchaseCredits > 1 ? 's' : ''}</div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPurchaseCredits((value) => clampCredits(value + 1))}
+                  className="w-14 h-14 rounded-full bg-orange-500 text-white text-3xl font-light hover:bg-orange-600 transition-colors flex items-center justify-center shadow-md"
+                  aria-label="Increase credits"
+                >
+                  +
+                </button>
+              </div>
+
+              <div className="mt-6 border-t border-gray-200 pt-5 text-center">
+                <p className="text-sm uppercase tracking-wide text-gray-500">Total Amount</p>
+                <p className="text-4xl sm:text-5xl font-black text-gray-900 mt-2">₦{totalAmount.toLocaleString()}</p>
+                <p className="text-sm text-gray-500 mt-2">{purchaseCredits} full mock exam session{purchaseCredits > 1 ? 's' : ''}</p>
               </div>
             </div>
 
@@ -116,7 +160,7 @@ export default function ExamPayment() {
 
             <button onClick={handlePayment} disabled={loading}
               className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white py-4 rounded-xl font-bold text-lg hover:from-orange-600 hover:to-red-600 transition-all shadow-lg">
-              {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Processing...</> : <><i className="fas fa-lock mr-2"></i>Pay ₦1,000 Securely</>}
+              {loading ? <><i className="fas fa-spinner fa-spin mr-2"></i>Processing...</> : <><i className="fas fa-lock mr-2"></i>Pay ₦{totalAmount.toLocaleString()} Securely</>}
             </button>
 
             <div className="mt-4 flex items-center justify-center gap-3 text-gray-500 text-sm">

@@ -512,7 +512,7 @@ app.post('/api/get-credits', async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  const { idToken } = req.body;
+  const { idToken, action } = req.body;
 
   if (!idToken) {
     return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -527,6 +527,31 @@ app.post('/api/get-credits', async (req, res) => {
   }
 
   try {
+    if (action === 'consume') {
+      const updatedUser = await User.findOneAndUpdate(
+        { uid, examCredits: { $gt: 0 } },
+        {
+          $inc: { examCredits: -1 },
+          $set: { lastExamStartedAt: new Date().toISOString() }
+        },
+        { new: true }
+      );
+
+      if (!updatedUser) {
+        return res.status(400).json({ success: false, error: 'No exam credits available. Please purchase credits to continue.' });
+      }
+
+      const remainingCredits = Number(updatedUser.examCredits) || 0;
+      return res.json({
+        success: true,
+        message: 'Exam credit consumed',
+        data: {
+          previousCredits: remainingCredits + 1,
+          remainingCredits
+        }
+      });
+    }
+
     const user = await User.findOne({ uid });
     const credits = user ? (Number(user.examCredits) || 0) : 0;
     res.json({ success: true, credits });

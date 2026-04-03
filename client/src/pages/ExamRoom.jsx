@@ -56,7 +56,7 @@ export default function ExamRoom() {
         try {
           const res = await fetch(`/api/questions?subject=${subj}&limit=${limit}`)
           const data = await res.json()
-          const qs = (data.questions || getSampleQuestions(subj, limit)).map((q, i) => ({ ...q, subject: subj, globalIndex: allQuestions.length + i }))
+          const qs = fillQuestionSet(data.questions || [], limit, subj).map((q, i) => ({ ...q, subject: subj, globalIndex: allQuestions.length + i }))
           groups[subj] = { start: allQuestions.length, count: qs.length }
           allQuestions.push(...qs)
         } catch (e) {
@@ -125,6 +125,18 @@ export default function ExamRoom() {
     return result
   }
 
+  const fillQuestionSet = (questionsList, limit, subject) => {
+    const source = questionsList.length > 0 ? questionsList : getSampleQuestions(subject, limit)
+    const result = []
+    while (result.length < limit && source.length > 0) {
+      for (const item of source) {
+        if (result.length >= limit) break
+        result.push({ ...item, id: result.length + 1 })
+      }
+    }
+    return result
+  }
+
   const submitExam = useCallback(async () => {
     if (done) return
     clearInterval(timerRef.current)
@@ -149,16 +161,6 @@ export default function ExamRoom() {
     const percentage = Math.round((totalCorrect / Math.max(totalQ, 1)) * 100)
     const examResult = { subjectResults, totalCorrect, totalQ, score, percentage, completedAt: new Date().toISOString() }
     setResults(examResult)
-    // Save to server if logged in
-    if (user) {
-      try {
-        const idToken = await user.getIdToken()
-        await fetch('/api/save-exam-result', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken, ...examResult, correctAnswers: totalCorrect, wrongAnswers: totalQ - Object.values(subjectResults).reduce((s, r) => s + r.answered, 0), totalScore: score })
-        })
-      } catch (e) {}
-    }
   }, [done, subjects, subjectGroups, questions, answers, user])
 
   const formatTime = (secs) => {

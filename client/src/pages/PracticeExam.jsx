@@ -29,7 +29,7 @@ export default function PracticeExam() {
       const data = await res.json()
       console.log(`Questions API response:`, data.count, 'questions, success:', data.success)
       if (data.success && data.questions && data.questions.length > 0) {
-        setQuestions(data.questions)
+        setQuestions(fillQuestionSet(data.questions, QUESTIONS_PER_SESSION, subject))
         console.log(`✅ Loaded ${data.questions.length} questions from MongoDB`)
       } else {
         console.warn('No questions from MongoDB, using fallback. Error:', data.error)
@@ -81,6 +81,18 @@ export default function PracticeExam() {
       ],
     }
     return (bank[subj] || bank.mathematics).map((q, i) => ({ ...q, id: i + 1 }))
+  }
+
+  const fillQuestionSet = (questionsList, limit, subj) => {
+    const source = questionsList.length > 0 ? questionsList : getFallback(subj)
+    const filled = []
+    while (filled.length < limit && source.length > 0) {
+      for (const question of source) {
+        if (filled.length >= limit) break
+        filled.push({ ...question, id: filled.length + 1 })
+      }
+    }
+    return filled
   }
 
   const fetchAIExplanation = async (qIdx) => {

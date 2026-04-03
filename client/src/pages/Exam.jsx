@@ -55,7 +55,11 @@ export default function Exam() {
     if (credits <= 0) { navigate('/exam/payment'); return }
     try {
       const idToken = await user.getIdToken()
-      const res = await fetch('/api/consume-credit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }) })
+      const res = await fetch('/api/get-credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, action: 'consume' })
+      })
       const data = await res.json()
       if (data.success) {
         sessionStorage.setItem('examSubjects', JSON.stringify(selectedSubjects))
