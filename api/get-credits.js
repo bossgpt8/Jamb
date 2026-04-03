@@ -1,6 +1,6 @@
-const { connectDB } = require('../db/mongoose');
+const { connectDB } = require('../lib/db');
 const User = require('../models/User');
-const { verifyFirebaseToken } = require('./utils/auth');
+const { verifyFirebaseToken } = require('../lib/auth');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');

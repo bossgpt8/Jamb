@@ -75,6 +75,7 @@ The project uses these backend endpoints and functions:
 - `POST /api/gemini-explain` - AI explanation generator
 - `POST /api/save-ai-message` - store AI chat messages
 - `POST /api/cleanup-chatroom` - remove old chat messages
+- `GET /api/payment-callback` - Paystack return handler that verifies payment and credits the user
 
 The root `server.js` also contains debug routes used during development.
 
@@ -90,6 +91,7 @@ Set these values for local development and deployment:
 - `APP_URL`
 - `CLEANUP_AUTH_KEY`
 - `SUPABASE_URL` and `SUPABASE_ANON_KEY` are no longer required for the current MongoDB-first setup
+- shared serverless helpers now live under `lib/` so Vercel does not count them as extra functions
 
 ## Local Development
 
@@ -118,6 +120,7 @@ The output directory is `client/dist`, and `/api/*` requests are routed to the V
 - The app is no longer a static HTML site.
 - MongoDB is now the primary data store.
 - Legacy Supabase/Vercel helper functions were removed to keep the deployment under the Hobby function limit.
+- Paystack now returns to a real callback route that verifies the transaction and redirects back into the app.
 - The old static-page README no longer matched the codebase, so this version reflects the current React app and backend.
 
 ## License

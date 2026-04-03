@@ -1,5 +1,5 @@
-const { connectDB } = require('./utils/db');
-const { transformQuestion } = require('./utils/transform');
+const { connectDB } = require('../lib/db');
+const { transformQuestion } = require('../lib/transform');
 const Question = require('../models/Question');
 
 const ENGLISH_QUESTION_COUNT = 60;
