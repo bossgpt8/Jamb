@@ -282,6 +282,12 @@ export default function ExamRoom() {
           {q && (
             <>
               <div className="bg-gray-800 rounded-xl p-6 mb-4">
+                {q.passage ? (
+                  <div className="mb-4 rounded-lg bg-gray-900/60 border border-gray-700 p-4">
+                    <p className="text-xs uppercase tracking-wide text-orange-300 mb-2">Passage</p>
+                    <p className="text-gray-200 text-sm leading-relaxed">{q.passage}</p>
+                  </div>
+                ) : null}
                 <p className="text-gray-400 text-sm mb-3">Question {currentQ + 1} of {questions.length}</p>
                 <p className="text-white text-lg font-medium leading-relaxed">{q.question}</p>
               </div>

@@ -231,6 +231,12 @@ export default function PracticeExam() {
       <div className="max-w-2xl mx-auto px-4 py-6">
         {/* Question card */}
         <div className="bg-white rounded-2xl shadow-sm p-6 mb-4 border border-gray-100">
+          {q.passage ? (
+            <div className="mb-4 rounded-xl bg-gray-50 border border-gray-200 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600 mb-2">Passage</p>
+              <p className="text-sm text-gray-700 leading-relaxed">{q.passage}</p>
+            </div>
+          ) : null}
           <p className="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Question {currentQ + 1} of {questions.length}</p>
           <p className="text-lg font-semibold text-gray-900 leading-relaxed">{q.question}</p>
           {q.year && <p className="text-xs text-gray-400 mt-2">JAMB {q.year}</p>}
