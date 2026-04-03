@@ -1224,6 +1224,38 @@ app.post('/api/streak/get', async (req, res) => {
 
 // ─── Exam Results Routes ───────────────────────────────────────────────────────
 
+app.post('/api/exam-results', async (req, res) => {
+  const { idToken, action = 'get', ...resultData } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    await connectDB();
+
+    if (action === 'save') {
+      const user = await User.findOneAndUpdate(
+        { uid },
+        { $push: { examResults: resultData } },
+        { upsert: true, new: true }
+      );
+      const savedResult = user.examResults[user.examResults.length - 1];
+      return res.json({ success: true, id: savedResult?._id?.toString() || 'saved' });
+    }
+
+    if (action === 'get') {
+      const user = await User.findOne({ uid }, { examResults: 1 });
+      const results = (user?.examResults || [])
+        .slice()
+        .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+      return res.json({ success: true, results });
+    }
+
+    return res.status(400).json({ success: false, error: 'Invalid action' });
+  } catch (err) {
+    console.error('Exam results error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/exam-results/save', async (req, res) => {
   const { idToken, ...resultData } = req.body;
   if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });

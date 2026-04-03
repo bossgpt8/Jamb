@@ -18,6 +18,10 @@ export default function ExamRoom() {
   const [subjects, setSubjects] = useState([])
   const [subjectGroups, setSubjectGroups] = useState({})
   const [user, setUser] = useState(null)
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
+  const [showCorrections, setShowCorrections] = useState(false)
+  const [correctionFilter, setCorrectionFilter] = useState('all')
+  const [groupCorrectionsBySubject, setGroupCorrectionsBySubject] = useState(true)
   const timerRef = useRef(null)
 
   useEffect(() => {
@@ -159,9 +163,69 @@ export default function ExamRoom() {
     const totalQ = questions.length
     const score = Math.round((totalCorrect / Math.max(totalQ, 1)) * 400)
     const percentage = Math.round((totalCorrect / Math.max(totalQ, 1)) * 100)
-    const examResult = { subjectResults, totalCorrect, totalQ, score, percentage, completedAt: new Date().toISOString() }
+    const corrections = questions
+      .map((question, index) => {
+        const selectedIndex = answers[index]
+        const isCorrect = selectedIndex === question.answer
+        return {
+          index,
+          question: question.question,
+          passage: question.passage || '',
+          options: question.options || [],
+          selectedIndex,
+          correctIndex: question.answer,
+          selectedAnswer: selectedIndex !== undefined ? question.options?.[selectedIndex] : '',
+          correctAnswer: question.options?.[question.answer],
+          explanation: question.explanation || '',
+          subject: question.subject || currentSubject || ''
+        }
+      })
+      .filter(item => item.selectedIndex === undefined || item.selectedIndex !== item.correctIndex)
+
+    const examResult = {
+      subjectResults,
+      totalCorrect,
+      totalQ,
+      score,
+      percentage,
+      completedAt: new Date().toISOString(),
+      mode: 'exam',
+      corrections
+    }
     setResults(examResult)
-  }, [done, subjects, subjectGroups, questions, answers, user])
+
+    if (user) {
+      try {
+        const idToken = await user.getIdToken()
+        const subjectScores = Object.fromEntries(
+          Object.entries(subjectResults).map(([subject, stats]) => [subject, {
+            correct: stats.correct,
+            total: stats.total,
+            answered: stats.answered
+          }])
+        )
+        await fetch('/api/exam-results', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            idToken,
+            action: 'save',
+            totalScore: score,
+            percentage,
+            correctAnswers: totalCorrect,
+            wrongAnswers: totalQ - totalCorrect,
+            subjectScores,
+            timeSpent: EXAM_DURATION - timeLeft,
+            completedAt: new Date().toISOString(),
+            mode: 'exam',
+            corrections
+          })
+        })
+      } catch (error) {
+        console.error('Failed to save exam result:', error)
+      }
+    }
+  }, [done, subjects, subjectGroups, questions, answers, user, timeLeft, currentSubject])
 
   const formatTime = (secs) => {
     const h = Math.floor(secs / 3600)
@@ -169,6 +233,21 @@ export default function ExamRoom() {
     const s = secs % 60
     return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   }
+
+  const allCorrections = results?.corrections || []
+  const filteredCorrections = allCorrections.filter((item) => {
+    const isUnanswered = item.selectedIndex === undefined
+    if (correctionFilter === 'unanswered') return isUnanswered
+    if (correctionFilter === 'wrong') return !isUnanswered
+    return true
+  })
+
+  const groupedCorrections = filteredCorrections.reduce((acc, item) => {
+    const key = item.subject || 'General'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(item)
+    return acc
+  }, {})
 
   if (loading) return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center">
@@ -216,6 +295,9 @@ export default function ExamRoom() {
             <button onClick={() => navigate('/exam')} className="flex-1 bg-orange-500 text-white py-4 rounded-xl font-bold text-lg hover:bg-orange-600 transition-colors">
               <i className="fas fa-redo mr-2"></i>Take Another Exam
             </button>
+            <button onClick={() => setShowCorrections(true)} className="flex-1 border-2 border-orange-500 text-orange-600 py-4 rounded-xl font-bold text-lg hover:bg-orange-50 transition-colors">
+              <i className="fas fa-list-check mr-2"></i>See Corrections
+            </button>
             <button onClick={() => navigate('/analytics')} className="flex-1 border-2 border-blue-600 text-blue-600 py-4 rounded-xl font-bold text-lg hover:bg-blue-50 transition-colors">
               <i className="fas fa-chart-bar mr-2"></i>View Analytics
             </button>
@@ -223,6 +305,143 @@ export default function ExamRoom() {
               <i className="fas fa-home mr-2"></i>Home
             </button>
           </div>
+
+          {showCorrections && (
+            <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowCorrections(false)} />
+              <div className="relative w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col">
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-5 text-white flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-2xl font-bold">Corrections</h3>
+                    <p className="text-blue-100 text-sm">Review missed questions, your answer, the correct answer, and explanations.</p>
+                  </div>
+                  <button onClick={() => setShowCorrections(false)} className="w-10 h-10 rounded-full bg-white/15 hover:bg-white/25 transition-colors flex items-center justify-center">
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+
+                <div className="p-6 border-b border-gray-200 bg-gray-50">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-700">Filter:</span>
+                    {[
+                      { key: 'all', label: `All (${allCorrections.length})` },
+                      { key: 'wrong', label: `Wrong (${allCorrections.filter(item => item.selectedIndex !== undefined).length})` },
+                      { key: 'unanswered', label: `Unanswered (${allCorrections.filter(item => item.selectedIndex === undefined).length})` },
+                    ].map((filter) => (
+                      <button
+                        key={filter.key}
+                        onClick={() => setCorrectionFilter(filter.key)}
+                        className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-colors ${correctionFilter === filter.key ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'}`}
+                      >
+                        {filter.label}
+                      </button>
+                    ))}
+
+                    <button
+                      onClick={() => setGroupCorrectionsBySubject(value => !value)}
+                      className={`ml-auto px-3 py-1.5 rounded-full text-sm font-semibold transition-colors ${groupCorrectionsBySubject ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'}`}
+                    >
+                      {groupCorrectionsBySubject ? 'Grouped by Subject' : 'Flat List'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 overflow-y-auto">
+                  {filteredCorrections.length > 0 ? (
+                    groupCorrectionsBySubject ? (
+                      <div className="space-y-6">
+                        {Object.entries(groupedCorrections).map(([subject, items]) => (
+                          <div key={subject} className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-lg font-bold text-gray-900 capitalize">{subject}</h4>
+                              <span className="text-sm font-semibold text-gray-600">{items.length} issue{items.length > 1 ? 's' : ''}</span>
+                            </div>
+                            {items.map((item, index) => (
+                              <div key={`${subject}-${item.index}-${index}`} className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                                <div className="flex items-start justify-between gap-4 mb-3">
+                                  <div>
+                                    <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Question {item.index + 1}</p>
+                                    <h4 className="text-lg font-semibold text-gray-900 leading-relaxed">{item.question}</h4>
+                                    {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> {item.passage}</p> : null}
+                                  </div>
+                                  <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${item.selectedIndex === undefined ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                    {item.selectedIndex === undefined ? 'Unanswered' : 'Incorrect'}
+                                  </span>
+                                </div>
+
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <div className="rounded-xl bg-white border border-red-200 p-4">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-red-600 mb-1">Your answer</p>
+                                    <p className="text-gray-900 font-medium">
+                                      {item.selectedIndex !== undefined ? `${String.fromCharCode(65 + item.selectedIndex)}. ${item.selectedAnswer || 'No answer selected'}` : 'Not answered'}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-xl bg-white border border-green-200 p-4">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-green-600 mb-1">Correct answer</p>
+                                    <p className="text-gray-900 font-medium">{String.fromCharCode(65 + item.correctIndex)}. {item.correctAnswer || 'Unavailable'}</p>
+                                  </div>
+                                </div>
+
+                                {item.explanation ? (
+                                  <div className="mt-4 rounded-xl bg-indigo-50 border border-indigo-100 p-4">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 mb-1">Explanation</p>
+                                    <p className="text-sm text-gray-700 leading-relaxed">{item.explanation}</p>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {filteredCorrections.map((item, index) => (
+                          <div key={`${item.index}-${index}`} className="rounded-2xl border border-gray-200 bg-gray-50 p-5">
+                            <div className="flex items-start justify-between gap-4 mb-3">
+                              <div>
+                                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Question {item.index + 1}</p>
+                                <h4 className="text-lg font-semibold text-gray-900 leading-relaxed">{item.question}</h4>
+                                <p className="text-xs mt-1 text-gray-500 capitalize">Subject: {item.subject || 'General'}</p>
+                                {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> {item.passage}</p> : null}
+                              </div>
+                              <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${item.selectedIndex === undefined ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                                {item.selectedIndex === undefined ? 'Unanswered' : 'Incorrect'}
+                              </span>
+                            </div>
+
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div className="rounded-xl bg-white border border-red-200 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-red-600 mb-1">Your answer</p>
+                                <p className="text-gray-900 font-medium">
+                                  {item.selectedIndex !== undefined ? `${String.fromCharCode(65 + item.selectedIndex)}. ${item.selectedAnswer || 'No answer selected'}` : 'Not answered'}
+                                </p>
+                              </div>
+                              <div className="rounded-xl bg-white border border-green-200 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-green-600 mb-1">Correct answer</p>
+                                <p className="text-gray-900 font-medium">{String.fromCharCode(65 + item.correctIndex)}. {item.correctAnswer || 'Unavailable'}</p>
+                              </div>
+                            </div>
+
+                            {item.explanation ? (
+                              <div className="mt-4 rounded-xl bg-indigo-50 border border-indigo-100 p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 mb-1">Explanation</p>
+                                <p className="text-sm text-gray-700 leading-relaxed">{item.explanation}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    <div className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center">
+                      <p className="text-lg font-semibold text-green-800">No corrections to show for this filter.</p>
+                      <p className="text-sm text-green-700 mt-1">Try a different filter or great work if none remain.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -250,7 +469,7 @@ export default function ExamRoom() {
           <div className={`font-mono text-2xl font-bold ${timerColor}`}>
             <i className="fas fa-clock mr-2"></i>{formatTime(timeLeft)}
           </div>
-          <button onClick={() => { if (window.confirm('Submit exam now? This cannot be undone.')) submitExam() }}
+          <button onClick={() => setShowSubmitConfirm(true)}
             className="bg-orange-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-600 transition-colors text-sm">
             Submit Exam
           </button>
@@ -342,6 +561,50 @@ export default function ExamRoom() {
           </div>
         </div>
       </div>
+
+      {showSubmitConfirm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowSubmitConfirm(false)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden">
+            <div className="bg-gradient-to-r from-orange-500 to-red-500 px-6 py-5 text-white">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-full bg-white/20 flex items-center justify-center">
+                  <i className="fas fa-exclamation-triangle text-xl"></i>
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">Submit Exam?</h3>
+                  <p className="text-sm text-orange-100">This action cannot be undone.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <p className="text-gray-700 leading-relaxed">
+                You have answered <span className="font-semibold text-gray-900">{answeredCount}</span> out of <span className="font-semibold text-gray-900">{questions.length}</span> questions.
+                Submitting now will end the exam and show your score immediately.
+              </p>
+
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={() => setShowSubmitConfirm(false)}
+                  className="flex-1 rounded-xl border border-gray-300 px-4 py-3 font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSubmitConfirm(false)
+                    submitExam()
+                  }}
+                  className="flex-1 rounded-xl bg-orange-500 px-4 py-3 font-semibold text-white hover:bg-orange-600 transition-colors"
+                >
+                  Submit Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

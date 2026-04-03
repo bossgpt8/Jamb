@@ -7,11 +7,12 @@ export async function saveExamResult(examData) {
     if (!user) { console.log('No user logged in, exam result not saved'); return null; }
 
     const idToken = await user.getIdToken();
-    const res = await fetch('/api/exam-results/save', {
+    const res = await fetch('/api/exam-results', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         idToken,
+        action: 'save',
         totalScore: examData.totalScore,
         percentage: examData.percentage,
         correctAnswers: examData.correctAnswers,
@@ -39,10 +40,10 @@ export async function getExamResults() {
     if (!user) return [];
 
     const idToken = await user.getIdToken();
-    const res = await fetch('/api/exam-results/get', {
+    const res = await fetch('/api/exam-results', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken })
+      body: JSON.stringify({ idToken, action: 'get' })
     });
     const data = await res.json();
     return data.success ? data.results : [];
