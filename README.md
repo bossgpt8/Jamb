@@ -1,90 +1,125 @@
-# JambGenius - Static Website
+# JambGenius
 
-## Overview
+JambGenius is a full-stack JAMB preparation platform built with a React/Vite frontend and an Express/MongoDB backend. It includes practice questions, mock exams, AI tutoring, analytics, community features, notifications, payment handling, and authentication.
 
-JambGenius is a static HTML website for Nigeria's premier JAMB UTME preparation platform. The website provides information about the platform's features, study tips, JAMB syllabus, help resources, and contact information.
+## What’s Included
 
-## Website Structure
+- Practice mode with topic, year, and subject filtering
+- Mock exam flow with exam room and payment gating
+- AI tutor and answer explanation flows powered by Groq
+- Daily challenge, analytics, profile, and sample questions pages
+- Study tips, syllabus, help center, contact, privacy, and terms pages
+- Firebase authentication with protected routes
+- MongoDB-backed question, chat, and user data
+- Paystack payment initiation and verification
+- Turnstile captcha verification
+- Notification helpers and chatroom support
 
-The website consists of the following pages:
+## Project Structure
 
-1. **index.html** - Landing page with hero section, subjects overview, features, and pricing
-2. **study-tips.html** - Comprehensive study strategies and exam preparation tips
-3. **jamb-syllabus.html** - Complete JAMB syllabus breakdown for all subjects
-4. **help-center.html** - FAQ and help resources
-5. **contact-us.html** - Contact information and contact form
-6. **styles.css** - Custom styles and CSS utilities
+The repository is split into two main parts:
 
-## Features
+- `client/` - React app built with Vite
+- root `server.js` - Express server and local API implementation
+- `api/` - Vercel serverless functions
+- `models/` and `db/` - MongoDB models and connection helpers
 
-- **Responsive Design** - Works perfectly on all devices (desktop, tablet, mobile)
-- **Modern UI** - Built with Tailwind CSS for a clean, professional look
-- **Fast Loading** - Static HTML pages load instantly
-- **SEO Optimized** - Proper meta tags and semantic HTML
-- **Contact Form** - Integrated with Formspree for form submissions
-- **Interactive FAQ** - JavaScript-powered accordion for help center
+## Frontend Routes
 
-## Technologies Used
+The active React app includes these routes:
 
-- HTML5
-- CSS3
-- Tailwind CSS (via CDN)
-- JavaScript (for interactive elements)
-- Formspree (for contact form)
+- `/` - Home
+- `/practice` - Practice questions
+- `/practice/exam` - Practice exam mode
+- `/exam` - Exam entry
+- `/exam/payment` - Payment step
+- `/exam/room` - Exam room
+- `/community` - Community area
+- `/more` - More tools and shortcuts
+- `/ai-tutor` - AI tutor
+- `/analytics` - Performance analytics
+- `/profile` - User profile
+- `/daily-challenge` - Daily challenge
+- `/study-tips` - Study tips
+- `/syllabus` - Syllabus
+- `/notifications` - Notifications
+- `/sample-questions` - Sample questions
+- `/help` - Help center
+- `/contact` - Contact page
+- `/privacy` - Privacy policy
+- `/terms` - Terms of service
 
-## Setup
+## Tech Stack
 
-No build process required! Simply open `index.html` in a web browser or deploy to any static hosting service.
+- React 18
+- Vite
+- React Router
+- Firebase Auth
+- Express
+- MongoDB with Mongoose
+- Paystack payments
+- Groq API for AI responses
+- Cloudflare Turnstile captcha
 
-### Deployment Options
+## API Overview
 
-- **Replit** - Already configured to serve static files
-- **Netlify** - Drag and drop the files
-- **GitHub Pages** - Push to repository and enable GitHub Pages
-- **Vercel** - Deploy with zero configuration
-- **Any web server** - Upload files via FTP/SFTP
+The project uses these backend endpoints and functions:
 
-## File Structure
+- `GET /api/questions` - fetch practice, daily, or exam questions
+- `POST /api/initiate-payment` - start Paystack checkout
+- `POST /api/verify-payment` - verify payment status
+- `POST /api/get-credits` - fetch user exam credits
+- `POST /api/verify-captcha` - verify captcha token
+- `POST /api/chat` - AI chat response
+- `POST /api/gemini-chat` - alternate AI chat handler
+- `POST /api/gemini-explain` - AI explanation generator
+- `POST /api/save-ai-message` - store AI chat messages
+- `POST /api/cleanup-chatroom` - remove old chat messages
 
-```
-├── index.html          # Landing page
-├── study-tips.html     # Study tips page
-├── jamb-syllabus.html  # Syllabus page
-├── help-center.html    # Help center page
-├── contact-us.html     # Contact page
-├── styles.css          # Custom styles
-└── README.md           # This file
-```
+The root `server.js` also contains debug routes used during development.
 
-## Customization
+## Environment Variables
 
-### Colors
-The website uses Tailwind CSS. To customize colors, you can:
-1. Modify the Tailwind classes in the HTML files
-2. Add custom CSS in `styles.css`
+Set these values for local development and deployment:
 
-### Content
-All content is directly in the HTML files. Simply edit the text in any HTML file to update content.
+- `MONGODB_URI`
+- `GROQ_API_KEY`
+- `PAYSTACK_SECRET_KEY`
+- `TURNSTILE_SECRET_KEY`
+- `FIREBASE_WEB_API_KEY`
+- `APP_URL`
+- `CLEANUP_AUTH_KEY`
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY` are no longer required for the current MongoDB-first setup
 
-### Contact Form
-The contact form uses Formspree. To use your own form:
-1. Sign up at [Formspree](https://formspree.io)
-2. Update the form action URL in `contact-us.html`
+## Local Development
 
-## Browser Support
+Install dependencies in both the root project and the client app:
 
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
-- Mobile browsers (iOS Safari, Chrome Mobile)
+1. `npm install`
+2. `cd client && npm install`
 
-## Contact Information
+Then run the frontend and backend as needed:
 
-- **Email**: osanisrael2@gmail.com
-- **Phone**: +234 916 489 8577
-- **WhatsApp**: +234 705 464 1687
+- Frontend: `cd client && npm run dev`
+- Backend: `npm run dev`
+
+The client Vite dev server runs on port `5000`.
+
+## Build and Deploy
+
+The Vercel config builds the client with:
+
+- `cd client && npm install && npm run build`
+
+The output directory is `client/dist`, and `/api/*` requests are routed to the Vercel serverless functions.
+
+## Notes
+
+- The app is no longer a static HTML site.
+- MongoDB is now the primary data store.
+- Legacy Supabase/Vercel helper functions were removed to keep the deployment under the Hobby function limit.
+- The old static-page README no longer matched the codebase, so this version reflects the current React app and backend.
 
 ## License
 
-© 2025 JambGenius. All rights reserved.
+© 2026 JambGenius. All rights reserved.
