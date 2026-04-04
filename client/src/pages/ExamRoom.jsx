@@ -24,6 +24,18 @@ export default function ExamRoom() {
   const [groupCorrectionsBySubject, setGroupCorrectionsBySubject] = useState(true)
   const timerRef = useRef(null)
 
+  // Anti-cheat state
+  const MAX_WARNINGS = 3
+  const [warningCount, setWarningCount] = useState(0)
+  const [antiCheatModal, setAntiCheatModal] = useState(null) // { message, remaining }
+  const warningCountRef = useRef(0)
+  const doneRef = useRef(false)
+  const showSubmitConfirmRef = useRef(false)
+
+  // keep refs in sync for use inside event handlers
+  useEffect(() => { showSubmitConfirmRef.current = showSubmitConfirm }, [showSubmitConfirm])
+  useEffect(() => { doneRef.current = done }, [done])
+
   useEffect(() => {
     document.title = 'JAMB Mock Exam | JambGenius'
     const subjectsStr = sessionStorage.getItem('examSubjects')
@@ -50,6 +62,80 @@ export default function ExamRoom() {
       return () => clearInterval(timerRef.current)
     }
   }, [loading, done])
+
+  // Anti-cheat: monitor tab switching, keyboard shortcuts, and right-click
+  useEffect(() => {
+    if (loading) return
+
+    const triggerViolation = (reason) => {
+      if (doneRef.current) return
+      if (showSubmitConfirmRef.current) return
+      warningCountRef.current += 1
+      const count = warningCountRef.current
+      setWarningCount(count)
+      const remaining = MAX_WARNINGS - count
+      setAntiCheatModal({ reason, count, remaining })
+      if (remaining <= 0) {
+        setTimeout(() => {
+          setAntiCheatModal(null)
+          submitExam()
+        }, 2500)
+      }
+    }
+
+    const handleVisibility = () => {
+      if (document.hidden) triggerViolation('You left the exam page or switched tabs.')
+    }
+
+    const handleKeyDown = (e) => {
+      if (doneRef.current) return
+      // Block developer tools
+      if (
+        e.key === 'F12' ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && ['i', 'I', 'j', 'J', 'c', 'C'].includes(e.key)) ||
+        ((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U'))
+      ) {
+        e.preventDefault()
+        triggerViolation('Attempt to open developer tools was blocked.')
+        return
+      }
+      // Block print
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault()
+        triggerViolation('Print attempt was blocked.')
+        return
+      }
+      // Block screenshot shortcut
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        triggerViolation('Screenshot shortcut was blocked.')
+      }
+    }
+
+    const handleKeyUp = (e) => {
+      if (doneRef.current) return
+      if (e.key === 'PrintScreen') {
+        navigator.clipboard?.writeText('').catch(() => {})
+        triggerViolation('Screenshot attempt was detected.')
+      }
+    }
+
+    const handleContextMenu = (e) => {
+      if (!doneRef.current) e.preventDefault()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    document.addEventListener('keydown', handleKeyDown, true)
+    document.addEventListener('keyup', handleKeyUp, true)
+    document.addEventListener('contextmenu', handleContextMenu)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      document.removeEventListener('keydown', handleKeyDown, true)
+      document.removeEventListener('keyup', handleKeyUp, true)
+      document.removeEventListener('contextmenu', handleContextMenu)
+    }
+  }, [loading])
 
   const loadQuestions = async (subjectList) => {
     try {
@@ -602,6 +688,45 @@ export default function ExamRoom() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Anti-cheat violation warning modal */}
+      {antiCheatModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-[10000] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
+            <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <i className="fas fa-exclamation-triangle text-4xl text-red-600"></i>
+            </div>
+            <h2 className="text-2xl font-bold text-red-600 mb-3">Malpractice Warning!</h2>
+            <p className="text-gray-700 mb-4">{antiCheatModal.reason}</p>
+            <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 mb-6">
+              <p className="text-red-700 font-bold text-xl">
+                Warning {antiCheatModal.count} of {MAX_WARNINGS}
+              </p>
+              {antiCheatModal.remaining > 0 ? (
+                <p className="text-red-600 mt-1 text-sm">
+                  {antiCheatModal.remaining} warning{antiCheatModal.remaining > 1 ? 's' : ''} remaining before automatic submission
+                </p>
+              ) : (
+                <p className="text-red-700 font-semibold mt-1 text-sm">
+                  Maximum warnings reached. Your exam will be submitted automatically.
+                </p>
+              )}
+            </div>
+            {antiCheatModal.remaining > 0 ? (
+              <button
+                onClick={() => setAntiCheatModal(null)}
+                className="w-full bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition-colors font-bold text-base"
+              >
+                <i className="fas fa-arrow-right mr-2"></i>Return to Exam
+              </button>
+            ) : (
+              <div className="flex justify-center">
+                <div className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            )}
           </div>
         </div>
       )}

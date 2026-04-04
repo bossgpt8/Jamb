@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import UserChip from '../components/UserChip'
+import ExamRulesModal from '../components/ExamRulesModal'
 import { auth } from '../firebase'
 
 export default function Exam() {
@@ -9,6 +10,7 @@ export default function Exam() {
   const { user, showToast } = useAuth()
   const [selectedSubjects, setSelectedSubjects] = useState(['english'])
   const [credits, setCredits] = useState(0)
+  const [showRules, setShowRules] = useState(false)
 
   useEffect(() => {
     document.title = 'Exam Mode - Select Subjects | JambGenius'
@@ -50,6 +52,11 @@ export default function Exam() {
 
   const canStart = selectedSubjects.length === 4
 
+  const handleStartClick = () => {
+    if (!canStart) return
+    setShowRules(true)
+  }
+
   const startExam = async () => {
     if (!user) return
     if (credits <= 0) { navigate('/exam/payment'); return }
@@ -76,6 +83,9 @@ export default function Exam() {
 
   return (
     <div className="bg-gray-50 font-sans page-fade-in">
+      {showRules && (
+        <ExamRulesModal onAccept={() => { setShowRules(false); startExam() }} />
+      )}
       <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
@@ -153,7 +163,7 @@ export default function Exam() {
 
         <div className="mt-8 text-center">
           <button
-            onClick={canStart ? startExam : undefined}
+            onClick={canStart ? handleStartClick : undefined}
             disabled={!canStart}
             className={`px-10 py-4 rounded-xl font-bold text-base transition-all ${canStart ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 shadow-lg hover:shadow-xl' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
           >
