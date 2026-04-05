@@ -8,6 +8,7 @@ export default function UserChip() {
   const { user, setShowSignIn } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [credits, setCredits] = useState(null)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -15,6 +16,26 @@ export default function UserChip() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  useEffect(() => {
+    if (!user) { setCredits(null); return }
+    let cancelled = false
+    const fetchCredits = async () => {
+      try {
+        const idToken = await user.getIdToken()
+        const res = await fetch('/api/get-credits', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken })
+        })
+        const data = await res.json()
+        if (!cancelled && data.success) setCredits(data.credits)
+      } catch (e) {
+        console.error('Failed to fetch credits:', e)
+      }    }
+    fetchCredits()
+    return () => { cancelled = true }
+  }, [user])
 
   if (!user) {
     return (
@@ -30,8 +51,20 @@ export default function UserChip() {
   return (
     <div className="relative" ref={ref}>
       <button onClick={() => setOpen(!open)} className="flex items-center space-x-2 hover:bg-gray-100 rounded-lg px-2 py-1 transition-colors">
-        <img src={avatarUrl} alt={displayName} className="w-8 h-8 rounded-full object-cover" />
+        <div className="relative">
+          <img src={avatarUrl} alt={displayName} className="w-8 h-8 rounded-full object-cover" />
+          {credits !== null && (
+            <span className="absolute -top-1.5 -right-1.5 bg-amber-400 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none shadow">
+              {credits}
+            </span>
+          )}
+        </div>
         <span className="text-gray-700 font-medium text-sm hidden sm:inline max-w-[100px] truncate">{displayName}</span>
+        {credits !== null && (
+          <span className="hidden sm:flex items-center gap-0.5 bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold px-2 py-0.5 rounded-full">
+            <i className="fas fa-coins text-[10px]"></i> {credits} credit{credits !== 1 ? 's' : ''}
+          </span>
+        )}
       </button>
       {open && (
         <div className="absolute right-0 top-11 bg-white rounded-xl shadow-xl border border-gray-200 w-56 z-50">
@@ -41,6 +74,11 @@ export default function UserChip() {
               <div className="min-w-0">
                 <p className="font-semibold text-gray-900 text-sm truncate">{displayName}</p>
                 <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                {credits !== null && (
+                  <p className="text-xs text-amber-600 font-medium mt-0.5">
+                    <i className="fas fa-coins mr-1"></i>{credits} exam credit{credits !== 1 ? 's' : ''} remaining
+                  </p>
+                )}
               </div>
             </div>
           </div>

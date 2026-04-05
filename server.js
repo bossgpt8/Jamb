@@ -8,7 +8,7 @@ const ChatMessage = require('./models/ChatMessage');
 const Question = require('./models/Question');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname)));
 
@@ -52,14 +52,21 @@ async function verifyFirebaseToken(idToken) {
   if (process.env.FIREBASE_WEB_API_KEY) {
     try {
       const verifyUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_WEB_API_KEY}`;
-      const response = await fetch(verifyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (!data.users || !data.users[0]) throw new Error('User not found');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(verifyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+          signal: controller.signal
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (!data.users || !data.users[0]) throw new Error('User not found');
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
     } catch (verifyErr) {
       console.warn('Token remote verify failed, falling back to JWT decode:', verifyErr.message);
