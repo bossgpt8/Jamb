@@ -72,7 +72,7 @@ export default function AITutor() {
   const canSend = !loading && input.trim().length > 0
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 font-sans page-fade-in">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50 font-sans page-fade-in">
 
       {/* ── Top Navigation ── */}
       <nav className="bg-white shadow-sm border-b border-gray-200 z-50 flex-shrink-0">
