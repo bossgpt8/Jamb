@@ -1,4 +1,4 @@
-// Gemini AI Handler - chat (Groq chatroom) and explain (Groq answer explanation)
+// Gemini AI Handler (uses Groq API) - chat (chatroom assistant) and explain (answer explanation)
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
