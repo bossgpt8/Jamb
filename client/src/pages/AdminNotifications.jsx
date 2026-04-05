@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { auth } from '../firebase'
 import { onAuthStateChanged } from 'firebase/auth'
 
-const ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2']
-
 export default function AdminNotifications() {
   const navigate = useNavigate()
   const [user, setUser] = useState(null)
@@ -23,11 +21,25 @@ export default function AdminNotifications() {
 
   useEffect(() => {
     document.title = 'Admin – Send Notifications | JambGenius'
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       if (!u) { navigate('/'); return }
-      if (!ADMIN_UIDS.includes(u.uid)) { navigate('/'); return }
-      setUser(u)
-      setIsAdmin(true)
+      try {
+        const idToken = await u.getIdToken()
+        const res = await fetch('/api/get-user-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken })
+        })
+        const data = await res.json()
+        if (data.success && data.profile?.role === 'admin') {
+          setUser(u)
+          setIsAdmin(true)
+        } else {
+          navigate('/')
+        }
+      } catch {
+        navigate('/')
+      }
     })
     return () => unsubscribe()
   }, [navigate])

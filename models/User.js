@@ -51,7 +51,10 @@ const userSchema = new mongoose.Schema({
   // Exam results history
   examResults:          { type: [examResultSchema], default: [] },
   // Reactions: map of messageId -> emoji
-  reactions:            { type: Map, of: String, default: {} }
+  reactions:            { type: Map, of: String, default: {} },
+  // Access control
+  role:                 { type: String, enum: ['user', 'admin'], default: 'user' },
+  isActive:             { type: Boolean, default: true }
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
