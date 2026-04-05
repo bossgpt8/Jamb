@@ -1,14 +1,26 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import UserChip from '../components/UserChip'
 
 const QUICK_PROMPTS = [
-  { label: '📐 Trigonometry', text: 'Explain trigonometry ratios for JAMB' },
-  { label: '🌿 Photosynthesis', text: 'Explain photosynthesis simply' },
-  { label: '📖 Comprehension tips', text: 'Give me tips for English comprehension in JAMB' },
-  { label: '⚡ Newton\'s laws', text: 'Explain Newton\'s three laws of motion' },
-  { label: '🧪 Periodic table', text: 'Help me memorize the periodic table groups' },
-  { label: '📊 Exam strategy', text: 'What is the best strategy to pass JAMB?' },
+  { label: 'Trigonometry', icon: 'fa-square-root-alt', text: 'Explain trigonometry ratios for JAMB', color: 'blue' },
+  { label: 'Photosynthesis', icon: 'fa-leaf', text: 'Explain photosynthesis simply', color: 'green' },
+  { label: 'Comprehension', icon: 'fa-book-open', text: 'Give me tips for English comprehension in JAMB', color: 'orange' },
+  { label: "Newton's Laws", icon: 'fa-atom', text: "Explain Newton's three laws of motion", color: 'purple' },
+  { label: 'Periodic Table', icon: 'fa-flask', text: 'Help me memorize the periodic table groups', color: 'teal' },
+  { label: 'Exam Strategy', icon: 'fa-chart-line', text: 'What is the best strategy to pass JAMB?', color: 'red' },
 ]
+
+const SUBJECT_TAGS = ['Mathematics', 'English', 'Physics', 'Chemistry', 'Biology', 'Government', 'Economics']
+
+const colorMap = {
+  blue: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
+  green: 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100',
+  orange: 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100',
+  purple: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100',
+  teal: 'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100',
+  red: 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100',
+}
 
 export default function AITutor() {
   const navigate = useNavigate()
@@ -57,162 +69,170 @@ export default function AITutor() {
     setHistory([])
   }
 
+  const canSend = !loading && input.trim().length > 0
+
   return (
-    <div style={{
-      background: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)',
-      minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: "'Inter', sans-serif"
-    }}>
-      {/* Header */}
-      <div style={{
-        background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(20px)',
-        borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '14px 16px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button onClick={() => navigate(-1)} style={{ color: '#a1a1aa', background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', padding: '4px' }}>
-            ←
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50 font-sans page-fade-in">
+
+      {/* ── Top Navigation ── */}
+      <nav className="bg-white shadow-sm border-b border-gray-200 z-50 flex-shrink-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <button onClick={() => navigate('/')} className="flex-shrink-0 flex items-center gap-2">
+              <i className="fas fa-graduation-cap text-2xl text-blue-600"></i>
+              <span className="text-xl font-bold text-gray-900">JambGenius</span>
+            </button>
+            <div className="hidden md:flex items-center gap-6 text-sm">
+              <button onClick={() => navigate('/practice')} className="text-gray-600 hover:text-blue-600 font-medium transition-colors">Practice</button>
+              <button onClick={() => navigate('/exam')} className="text-gray-600 hover:text-blue-600 font-medium transition-colors">Mock Exam</button>
+              <button onClick={() => navigate('/analytics')} className="text-gray-600 hover:text-blue-600 font-medium transition-colors">Analytics</button>
+              <span className="flex items-center gap-1 text-purple-600 font-semibold">
+                <i className="fas fa-robot"></i> AI Tutor
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={clearChat}
+                title="Clear conversation"
+                className="hidden sm:flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors"
+              >
+                <i className="fas fa-trash-alt text-xs"></i>
+                <span>Clear chat</span>
+              </button>
+              <UserChip />
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      {/* ── Hero Banner ── */}
+      <div className="bg-gradient-to-r from-purple-600 via-violet-600 to-blue-600 flex-shrink-0">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate(-1)} className="text-white/70 hover:text-white transition-colors p-1">
+              <i className="fas fa-arrow-left text-sm"></i>
+            </button>
+            <div className="relative">
+              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center ring-2 ring-white/30">
+                <i className="fas fa-robot text-white text-lg"></i>
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 border-2 border-purple-600 rounded-full"></span>
+            </div>
+            <div>
+              <p className="text-white font-bold text-sm leading-tight">JambGenius AI Tutor</p>
+              <p className="text-green-300 text-xs font-medium">● Online · Powered by Grok</p>
+            </div>
+          </div>
+          <div className="hidden sm:flex flex-wrap gap-1.5">
+            {SUBJECT_TAGS.map(s => (
+              <span key={s} className="text-xs bg-white/15 text-white/90 px-2 py-0.5 rounded-full font-medium">{s}</span>
+            ))}
+          </div>
+          <button
+            onClick={clearChat}
+            title="Clear conversation"
+            className="sm:hidden text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-lg p-2 transition-colors"
+          >
+            <i className="fas fa-trash-alt text-sm"></i>
           </button>
-          <div style={{ position: 'relative' }}>
-            <div style={{
-              width: '42px', height: '42px',
-              background: 'linear-gradient(135deg, #667eea, #764ba2)',
-              borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 0 20px rgba(102,126,234,0.5)'
-            }}>
-              <span style={{ fontSize: '20px' }}>🤖</span>
-            </div>
-            <div style={{
-              position: 'absolute', bottom: '1px', right: '1px',
-              width: '11px', height: '11px', background: '#22c55e',
-              borderRadius: '50%', border: '2px solid #0f0c29'
-            }} />
-          </div>
-          <div>
-            <div style={{ color: '#fff', fontWeight: '700', fontSize: '16px', letterSpacing: '-0.3px' }}>JambGenius AI Tutor</div>
-            <div style={{ color: '#22c55e', fontSize: '11px', fontWeight: '500' }}>● Online • Powered by Grok</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={clearChat} title="Clear chat" style={{
-            color: '#a1a1aa', background: 'rgba(255,255,255,0.08)', border: 'none',
-            borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', fontSize: '14px'
-          }}>🗑️</button>
-          <button onClick={() => navigate('/')} style={{
-            color: '#a1a1aa', background: 'rgba(255,255,255,0.08)', border: 'none',
-            borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', fontSize: '14px'
-          }}>🏠</button>
         </div>
       </div>
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {messages.map((msg, i) => (
-          <div key={i} style={{ display: 'flex', gap: '10px', flexDirection: msg.role === 'user' ? 'row-reverse' : 'row', alignItems: 'flex-end' }}>
-            {msg.role === 'ai' && (
-              <div style={{
-                width: '34px', height: '34px', flexShrink: 0,
-                background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 4px 12px rgba(102,126,234,0.4)', fontSize: '16px'
-              }}>🤖</div>
-            )}
-            <div style={{
-              maxWidth: '78%',
-              padding: '12px 16px',
-              borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
-              background: msg.role === 'user'
-                ? 'linear-gradient(135deg, #667eea, #764ba2)'
-                : 'rgba(255,255,255,0.09)',
-              backdropFilter: 'blur(10px)',
-              border: msg.role === 'ai' ? '1px solid rgba(255,255,255,0.1)' : 'none',
-              color: '#fff', fontSize: '14px', lineHeight: '1.7',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              boxShadow: msg.role === 'user' ? '0 4px 15px rgba(102,126,234,0.4)' : '0 2px 8px rgba(0,0,0,0.3)'
-            }}>
-              {msg.content}
+      {/* ── Chat Body ── */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="max-w-4xl mx-auto px-4 py-5 space-y-5">
+
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex items-end gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+
+              {/* Avatar */}
+              {msg.role === 'ai' ? (
+                <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center shadow-md">
+                  <i className="fas fa-robot text-white text-xs"></i>
+                </div>
+              ) : (
+                <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-br from-blue-500 to-blue-700 rounded-full flex items-center justify-center shadow-md">
+                  <i className="fas fa-user text-white text-xs"></i>
+                </div>
+              )}
+
+              {/* Bubble */}
+              <div
+                className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap break-words ${
+                  msg.role === 'user'
+                    ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-br-sm'
+                    : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm'
+                }`}
+              >
+                {msg.content}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {loading && (
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-            <div style={{
-              width: '34px', height: '34px',
-              background: 'linear-gradient(135deg, #667eea, #764ba2)',
-              borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px'
-            }}>🤖</div>
-            <div style={{
-              background: 'rgba(255,255,255,0.09)', backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              padding: '14px 18px', borderRadius: '4px 18px 18px 18px',
-              display: 'flex', gap: '5px', alignItems: 'center'
-            }}>
-              {[0, 1, 2].map(d => (
-                <div key={d} style={{
-                  width: '7px', height: '7px', borderRadius: '50%',
-                  background: '#667eea', animation: 'bounce 1.2s infinite',
-                  animationDelay: `${d * 0.2}s`
-                }} />
-              ))}
+          {/* Typing indicator */}
+          {loading && (
+            <div className="flex items-end gap-3">
+              <div className="w-8 h-8 flex-shrink-0 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center shadow-md">
+                <i className="fas fa-robot text-white text-xs"></i>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                <span className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+              </div>
             </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* ── Quick Prompts ── */}
+      <div className="flex-shrink-0 bg-white border-t border-gray-100">
+        <div className="max-w-4xl mx-auto px-4 py-2.5 flex gap-2 overflow-x-auto scrollbar-hide">
+          {QUICK_PROMPTS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => sendMessage(p.text)}
+              disabled={loading}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold whitespace-nowrap transition-all flex-shrink-0 disabled:opacity-50 ${colorMap[p.color]}`}
+            >
+              <i className={`fas ${p.icon} text-[10px]`}></i>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Input Area ── */}
+      <div className="flex-shrink-0 bg-white border-t border-gray-200 shadow-[0_-1px_6px_rgba(0,0,0,0.06)]">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-end gap-3">
+          <div className="flex-1 relative">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="Ask anything about JAMB subjects..."
+              rows={1}
+              className="w-full bg-gray-50 border border-gray-300 focus:border-purple-400 focus:ring-2 focus:ring-purple-100 rounded-2xl px-4 py-3 pr-4 text-sm text-gray-900 placeholder-gray-400 outline-none resize-none font-sans leading-relaxed transition-colors"
+              style={{ maxHeight: '120px', overflowY: 'auto' }}
+            />
           </div>
-        )}
-        <div ref={messagesEndRef} />
+          <button
+            onClick={() => sendMessage()}
+            disabled={!canSend}
+            className={`flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-md ${
+              canSend
+                ? 'bg-gradient-to-br from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700 hover:shadow-lg hover:scale-105'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none'
+            }`}
+          >
+            <i className="fas fa-paper-plane text-sm"></i>
+          </button>
+        </div>
+        <p className="text-center text-xs text-gray-400 pb-2">Press <kbd className="bg-gray-100 border border-gray-300 rounded px-1 text-gray-500">Enter</kbd> to send · <kbd className="bg-gray-100 border border-gray-300 rounded px-1 text-gray-500">Shift+Enter</kbd> for new line</p>
       </div>
-
-      {/* Quick prompts */}
-      <div style={{ padding: '8px 16px', display: 'flex', gap: '8px', overflowX: 'auto', flexShrink: 0 }}>
-        {QUICK_PROMPTS.map(p => (
-          <button key={p.label} onClick={() => sendMessage(p.text)} style={{
-            background: 'rgba(102,126,234,0.15)', border: '1px solid rgba(102,126,234,0.3)',
-            color: '#a5b4fc', borderRadius: '20px', padding: '7px 14px',
-            fontSize: '12px', cursor: 'pointer', whiteSpace: 'nowrap',
-            fontWeight: '500', transition: 'all 0.2s', flexShrink: 0
-          }}>{p.label}</button>
-        ))}
-      </div>
-
-      {/* Input */}
-      <div style={{
-        padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(10px)',
-        display: 'flex', gap: '10px', alignItems: 'flex-end', flexShrink: 0
-      }}>
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={handleKey}
-          placeholder="Ask anything about JAMB..."
-          rows={1}
-          style={{
-            flex: 1, background: 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.15)', borderRadius: '16px',
-            padding: '12px 16px', color: '#fff', fontSize: '14px',
-            outline: 'none', resize: 'none', fontFamily: 'inherit', lineHeight: '1.5',
-            maxHeight: '120px', overflowY: 'auto'
-          }}
-        />
-        <button
-          onClick={() => sendMessage()}
-          disabled={loading || !input.trim()}
-          style={{
-            background: loading || !input.trim() ? 'rgba(102,126,234,0.3)' : 'linear-gradient(135deg, #667eea, #764ba2)',
-            border: 'none', borderRadius: '50%', width: '48px', height: '48px',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-            flexShrink: 0, fontSize: '18px', transition: 'all 0.2s',
-            boxShadow: loading || !input.trim() ? 'none' : '0 4px 15px rgba(102,126,234,0.5)'
-          }}
-        >➤</button>
-      </div>
-
-      <style>{`
-        @keyframes bounce { 0%,80%,100%{transform:scale(0)} 40%{transform:scale(1)} }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
-      `}</style>
     </div>
   )
 }

@@ -1,12 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import UserChip from '../components/UserChip'
 
-const STORAGE_KEY = 'jg_chat_messages'
 const NAME_KEY = 'jg_chat_display_name'
-
-// Admin UIDs - add your Firebase UID here to get admin powers
 const ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2']
 
 const BOSS_SUGGESTIONS = [
@@ -16,6 +13,55 @@ const BOSS_SUGGESTIONS = [
   '@boss help me understand ',
   '@boss what year did ',
 ]
+
+// Compress an image File to a base64 JPEG string
+const compressImage = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.src = e.target.result
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let { width, height } = img
+        if (width > 800 || height > 600) {
+          const ratio = Math.min(800 / width, 600 / height)
+          width = Math.round(width * ratio)
+          height = Math.round(height * ratio)
+        }
+        canvas.width = width
+        canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', 0.7))
+      }
+      img.onerror = reject
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+
+// Convert a Blob to a base64 data URL
+const blobToBase64 = (blob) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+
+// Map a raw DB document to the shape used in state
+const mapDbMessage = (m) => ({
+  id: m._id || m.id || String(Date.now() + Math.random()),
+  sender: m.isAdmin ? 'JambGenius Boss' : (m.displayName || 'Student'),
+  text: m.text || '',
+  imageData: m.imageData,
+  voiceData: m.voiceData,
+  type: m.type || 'text',
+  isBot: !!m.isAdmin,
+  time: m.createdAt
+    ? new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '--:--',
+})
 
 export default function Community() {
   const navigate = useNavigate()
@@ -27,30 +73,48 @@ export default function Community() {
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
+  const recordingTimerRef = useRef(null)
 
   const isAdmin = user && ADMIN_UIDS.includes(user.uid)
+  const fmtTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const getDisplayName = () => chatName || user?.displayName || user?.email?.split('@')[0] || 'Student'
+  const fmtRecording = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
+  // ── Fetch messages from backend ───────────────────────────────────────────
+  const fetchMessages = useCallback(async () => {
+    try {
+      const res = await fetch('/api/community-messages')
+      const data = await res.json()
+      if (data.success && Array.isArray(data.messages)) {
+        setMessages(data.messages.map(mapDbMessage))
+      }
+    } catch {
+      // keep current state on network error
+    }
+  }, [])
 
   useEffect(() => {
     document.title = 'Student Chatroom - JambGenius'
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      try { setMessages(JSON.parse(saved)) } catch {}
-    } else {
-      const welcome = [{ id: 1, sender: 'JambGenius Boss', text: 'Welcome to the JambGenius Community Chat! 🎓 Type @boss to ask the AI tutor anything about JAMB prep!', isBot: true, time: now() }]
-      setMessages(welcome)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(welcome))
-    }
     const savedName = localStorage.getItem(NAME_KEY)
     if (savedName) setChatName(savedName)
-  }, [])
+    fetchMessages()
+    const interval = setInterval(fetchMessages, 4000)
+    return () => clearInterval(interval)
+  }, [fetchMessages])
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
-  const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const getDisplayName = () => chatName || user?.displayName || user?.email?.split('@')[0] || 'Student'
-
+  // ── Display name ──────────────────────────────────────────────────────────
   const saveName = () => {
     const trimmed = nameInput.trim()
     if (!trimmed) { showToast('Please enter a name', 'warning'); return }
@@ -60,15 +124,14 @@ export default function Community() {
     showToast('Chat name updated!', 'success')
   }
 
+  // ── @boss suggestions ─────────────────────────────────────────────────────
   const handleInputChange = (e) => {
     const val = e.target.value
     setInput(val)
-    // Show @boss suggestions when user types @
-    if (val.endsWith('@') || val.endsWith('@b') || val.endsWith('@bo') || val.endsWith('@bos') || val === '@boss') {
-      setShowSuggestions(true)
-    } else {
-      setShowSuggestions(false)
-    }
+    setShowSuggestions(
+      val.endsWith('@') || val.endsWith('@b') || val.endsWith('@bo') ||
+      val.endsWith('@bos') || val === '@boss'
+    )
   }
 
   const applySuggestion = (suggestion) => {
@@ -77,38 +140,55 @@ export default function Community() {
     inputRef.current?.focus()
   }
 
-  const sendMessage = async () => {
-    if (!input.trim() || sending) return
-    const text = input.trim()
+  // ── POST helper ───────────────────────────────────────────────────────────
+  const postToBackend = async (payload) => {
+    try {
+      if (user) payload.idToken = await user.getIdToken()
+      const res = await fetch('/api/community-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: getDisplayName(), userEmail: user?.email || '', ...payload }),
+      })
+      return await res.json()
+    } catch {
+      return { success: false }
+    }
+  }
+
+  // ── Send text ─────────────────────────────────────────────────────────────
+  const sendMessage = async (overrideText) => {
+    const text = (overrideText !== undefined ? overrideText : input).trim()
+    if (!text || sending) return
     setInput('')
     setShowSuggestions(false)
 
-    const userMsg = { id: Date.now(), sender: getDisplayName(), text, isBot: false, time: now() }
-    const updated = [...messages, userMsg]
-    setMessages(updated)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    // Optimistic UI
+    setMessages(prev => [...prev, {
+      id: Date.now(), sender: getDisplayName(), text, type: 'text', isBot: false, time: fmtTime()
+    }])
 
-    // Trigger AI if message contains @boss or ends with ?
+    await postToBackend({ type: 'text', text })
+
     const shouldCallAI = text.toLowerCase().includes('@boss') || (text.includes('?') && text.length > 5)
     if (shouldCallAI) {
       setSending(true)
       try {
-        const res = await fetch('/api/gemini-chat', {
+        const aiRes = await fetch('/api/gemini-chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: text.replace(/@boss/gi, '').trim() || text })
+          body: JSON.stringify({ question: text.replace(/@boss/gi, '').trim() || text }),
         })
-        const data = await res.json()
-        const botMsg = {
-          id: Date.now() + 1,
-          sender: 'JambGenius Boss',
-          text: data.answer || 'I could not answer that right now.',
-          isBot: true,
-          time: now()
-        }
-        const withBot = [...updated, botMsg]
-        setMessages(withBot)
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(withBot))
+        const aiData = await aiRes.json()
+        const answer = aiData.answer || 'I could not answer that right now.'
+        await fetch('/api/community-messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'text', text: answer,
+            displayName: 'JambGenius Boss', userEmail: 'boss@jambgenius.com', isBot: true,
+          }),
+        })
+        await fetchMessages()
       } catch {
         showToast('Could not reach AI Boss', 'error')
       } finally {
@@ -117,17 +197,115 @@ export default function Community() {
     }
   }
 
+  // ── Image upload ──────────────────────────────────────────────────────────
+  const handleImageSelect = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    if (!user) { showToast('Sign in to send images', 'error'); return }
+    if (!file.type.startsWith('image/')) { showToast('Please select an image file', 'error'); return }
+    if (file.size > 5 * 1024 * 1024) { showToast('Image must be under 5 MB', 'error'); return }
+    setSending(true)
+    try {
+      const base64 = await compressImage(file)
+      setMessages(prev => [...prev, {
+        id: Date.now(), sender: getDisplayName(), type: 'image',
+        imageData: base64, imageName: file.name, isBot: false, time: fmtTime()
+      }])
+      const result = await postToBackend({ type: 'image', imageData: base64, imageName: file.name })
+      if (!result.success) showToast('Failed to send image', 'error')
+      await fetchMessages()
+    } catch {
+      showToast('Failed to process image', 'error')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // ── Voice recording ───────────────────────────────────────────────────────
+  const startRecording = async () => {
+    if (isRecording) return
+    if (!user) { showToast('Sign in to send voice notes', 'error'); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+      audioChunksRef.current = []
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
+      recorder.onstop = handleRecordingStop
+      recorder.start()
+      setIsRecording(true)
+      setRecordingSeconds(0)
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000)
+    } catch {
+      showToast('Cannot access microphone. Check permissions.', 'error')
+    }
+  }
+
+  const stopRecording = () => {
+    if (!isRecording || !mediaRecorderRef.current) return
+    mediaRecorderRef.current.stop()
+    mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+    clearInterval(recordingTimerRef.current)
+    setIsRecording(false)
+    setRecordingSeconds(0)
+  }
+
+  const cancelRecording = () => {
+    if (!mediaRecorderRef.current) return
+    mediaRecorderRef.current.onstop = null
+    if (mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+    }
+    clearInterval(recordingTimerRef.current)
+    audioChunksRef.current = []
+    setIsRecording(false)
+    setRecordingSeconds(0)
+  }
+
+  const handleRecordingStop = async () => {
+    if (audioChunksRef.current.length === 0) return
+    const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+    audioChunksRef.current = []
+    setSending(true)
+    try {
+      const base64 = await blobToBase64(blob)
+      setMessages(prev => [...prev, {
+        id: Date.now(), sender: getDisplayName(), type: 'voice',
+        voiceData: base64, isBot: false, time: fmtTime()
+      }])
+      const result = await postToBackend({ type: 'voice', voiceData: base64 })
+      if (!result.success) showToast('Failed to send voice note', 'error')
+      await fetchMessages()
+    } catch {
+      showToast('Failed to send voice note', 'error')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // ── Admin clear ───────────────────────────────────────────────────────────
+  const clearChat = async () => {
+    if (!isAdmin) { showToast('Only admins can clear the chat', 'error'); return }
+    try {
+      const idToken = await user.getIdToken()
+      const res = await fetch('/api/community-clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      })
+      const data = await res.json()
+      if (data.success) { showToast('Chat cleared', 'success'); await fetchMessages() }
+      else showToast('Failed to clear chat', 'error')
+    } catch {
+      showToast('Failed to clear chat', 'error')
+    }
+  }
+
   const handleKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
     if (e.key === 'Escape') setShowSuggestions(false)
-  }
-
-  const clearChat = () => {
-    if (!isAdmin) { showToast('Only admins can clear the chat', 'error'); return }
-    const welcome = [{ id: 1, sender: 'JambGenius Boss', text: 'Chat cleared by admin. Welcome! 🎓', isBot: true, time: now() }]
-    setMessages(welcome)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(welcome))
-    showToast('Chat cleared', 'success')
   }
 
   return (
@@ -176,18 +354,18 @@ export default function Community() {
 
       <div className="max-w-3xl mx-auto px-4 py-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col" style={{ height: 'calc(100vh - 220px)', minHeight: '400px' }}>
+
           {/* Chat header */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white flex items-center justify-between">
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white flex items-center justify-between flex-shrink-0">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
                 <i className="fas fa-users text-lg"></i>
               </div>
               <div>
                 <h2 className="font-bold text-lg">JambGenius Community</h2>
-                <p className="text-blue-100 text-xs">Type @boss to ask the AI tutor • Like WhatsApp @MetaAI</p>
+                <p className="text-blue-100 text-xs">Type @boss for AI tutor · Images &amp; Voice notes supported</p>
               </div>
             </div>
-            {/* Only admins see the trash button */}
             {isAdmin && (
               <button onClick={clearChat} className="text-white/70 hover:text-white text-xs flex items-center gap-1 bg-white/10 px-2 py-1 rounded-lg" title="Admin: Clear chat">
                 <i className="fas fa-trash-alt"></i> <span className="hidden sm:inline">Clear</span>
@@ -204,16 +382,29 @@ export default function Community() {
                   <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white ${msg.isBot ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-green-500'}`}>
                     {msg.isBot ? <i className="fas fa-robot text-xs"></i> : msg.sender.charAt(0).toUpperCase()}
                   </div>
-                  <div className={`max-w-[75%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
+                  <div className={`max-w-[75%] flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
                     {!isMe && <span className="text-xs text-gray-500 ml-1">{msg.sender}</span>}
                     <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${isMe ? 'bg-blue-600 text-white rounded-br-sm' : msg.isBot ? 'bg-indigo-50 text-gray-800 border border-indigo-100 rounded-bl-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>
-                      {msg.text}
+                      {msg.type === 'image' && msg.imageData ? (
+                        <img
+                          src={msg.imageData}
+                          alt={msg.imageName || 'image'}
+                          className="max-w-full rounded-xl cursor-pointer"
+                          style={{ maxHeight: '200px', maxWidth: '240px' }}
+                          onClick={() => window.open(msg.imageData, '_blank')}
+                        />
+                      ) : msg.type === 'voice' && msg.voiceData ? (
+                        <audio controls src={msg.voiceData} style={{ minWidth: '180px', maxWidth: '260px' }} />
+                      ) : (
+                        msg.text
+                      )}
                     </div>
                     <span className="text-xs text-gray-400 mx-1">{msg.time}</span>
                   </div>
                 </div>
               )
             })}
+
             {sending && (
               <div className="flex items-end gap-2">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
@@ -221,7 +412,7 @@ export default function Community() {
                 </div>
                 <div className="bg-indigo-50 border border-indigo-100 rounded-2xl rounded-bl-sm px-4 py-3">
                   <div className="flex gap-1">
-                    {[0,1,2].map(d => <span key={d} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d*150}ms` }}></span>)}
+                    {[0, 1, 2].map(d => <span key={d} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d * 150}ms` }}></span>)}
                   </div>
                 </div>
               </div>
@@ -229,9 +420,9 @@ export default function Community() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* @boss suggestions dropdown - like WhatsApp @MetaAI */}
+          {/* @boss suggestions */}
           {showSuggestions && (
-            <div className="border-t border-gray-100 bg-white">
+            <div className="border-t border-gray-100 bg-white flex-shrink-0">
               <div className="px-3 py-1.5 text-xs text-gray-400 font-medium flex items-center gap-1">
                 <i className="fas fa-robot text-indigo-500"></i> Ask JambGenius Boss
               </div>
@@ -245,27 +436,82 @@ export default function Community() {
             </div>
           )}
 
-          {/* Input */}
-          <div className="p-3 border-t border-gray-100 bg-gray-50">
+          {/* Recording indicator */}
+          {isRecording && (
+            <div className="border-t border-red-100 bg-red-50 px-4 py-2 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                <span className="text-sm text-red-600 font-medium">Recording {fmtRecording(recordingSeconds)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={cancelRecording} className="text-xs text-gray-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-100 transition-colors">
+                  <i className="fas fa-times mr-1"></i>Cancel
+                </button>
+                <button onClick={stopRecording} className="text-xs text-white bg-red-500 hover:bg-red-600 px-3 py-1 rounded-lg font-medium transition-colors">
+                  <i className="fas fa-stop mr-1"></i>Send
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Input area */}
+          <div className="p-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
             <div className="flex gap-2 items-end">
-              <div className="flex-1 relative">
+              {/* Image attach */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending || isRecording}
+                title="Send image"
+                className="flex-shrink-0 w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:border-blue-300 transition-colors disabled:opacity-40"
+              >
+                <i className="fas fa-image text-sm"></i>
+              </button>
+
+              {/* Text input */}
+              <div className="flex-1">
                 <input
                   ref={inputRef}
                   type="text" value={input}
                   onChange={handleInputChange}
                   onKeyDown={handleKey}
-                  placeholder={`Message as ${getDisplayName()}... (type @ for AI)`}
-                  className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={isRecording}
+                  placeholder={isRecording ? 'Recording…' : `Message as ${getDisplayName()}… (type @ for AI)`}
+                  className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                   maxLength={500}
                 />
               </div>
-              <button onClick={sendMessage} disabled={!input.trim() || sending}
-                className="bg-blue-600 text-white w-11 h-11 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center disabled:opacity-40 flex-shrink-0">
+
+              {/* Mic button */}
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={sending && !isRecording}
+                title={isRecording ? 'Stop & send voice note' : 'Record voice note'}
+                className={`flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors border ${
+                  isRecording
+                    ? 'bg-red-500 border-red-500 text-white hover:bg-red-600 animate-pulse'
+                    : 'bg-white border-gray-200 text-gray-500 hover:text-red-500 hover:border-red-300'
+                } disabled:opacity-40`}
+              >
+                <i className={`fas fa-microphone${isRecording ? '-slash' : ''} text-sm`}></i>
+              </button>
+
+              {/* Send button */}
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || sending || isRecording}
+                className="flex-shrink-0 bg-blue-600 text-white w-11 h-11 rounded-xl hover:bg-blue-700 transition-colors flex items-center justify-center disabled:opacity-40"
+              >
                 <i className="fas fa-paper-plane text-sm"></i>
               </button>
             </div>
-            <p className="text-xs text-gray-400 mt-1 text-center">Type <strong>@boss</strong> to call the AI tutor</p>
+            <p className="text-xs text-gray-400 mt-1.5 text-center">
+              Type <strong>@boss</strong> for AI tutor &nbsp;·&nbsp;
+              <i className="fas fa-image text-xs"></i> for images &nbsp;·&nbsp;
+              <i className="fas fa-microphone text-xs"></i> tap to record voice notes
+            </p>
           </div>
+
         </div>
       </div>
     </div>

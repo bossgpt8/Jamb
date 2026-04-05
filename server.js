@@ -1334,6 +1334,104 @@ app.post('/api/chat-reactions', async (req, res) => {
   }
 });
 
+// ─── Community Chat (shared, persistent) ────────────────────────────────────
+
+const COMMUNITY_ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2'];
+
+// GET  /api/community-messages  – last 100 messages
+app.get('/api/community-messages', async (req, res) => {
+  try {
+    const messages = await ChatMessage.find()
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+    if (messages.length === 0) {
+      return res.json({
+        success: true,
+        messages: [{
+          _id: 'welcome',
+          type: 'text',
+          text: 'Welcome to the JambGenius Community Chat! 🎓 Type @boss to ask the AI tutor anything about JAMB prep!',
+          displayName: 'JambGenius Boss',
+          isAdmin: true,
+          createdAt: new Date().toISOString(),
+        }],
+      });
+    }
+    res.json({ success: true, messages: messages.reverse() });
+  } catch (err) {
+    console.error('Fetch community messages error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/community-messages  – send text / image / voice
+app.post('/api/community-messages', async (req, res) => {
+  const { idToken, type, text, imageData, voiceData, imageName, displayName, userEmail, isBot } = req.body;
+  let userId = 'anonymous';
+  let isAdminUser = false;
+
+  if (idToken) {
+    try {
+      userId = await verifyFirebaseToken(idToken);
+      isAdminUser = COMMUNITY_ADMIN_UIDS.includes(userId);
+    } catch {
+      if (type !== 'text') {
+        return res.status(401).json({ success: false, error: 'Auth required for media messages' });
+      }
+    }
+  } else if (type !== 'text') {
+    return res.status(401).json({ success: false, error: 'Auth required for media messages' });
+  }
+
+  const finalIsAdmin = isAdminUser || (isBot === true && displayName === 'JambGenius Boss');
+
+  try {
+    const msg = await ChatMessage.create({
+      type: type || 'text',
+      text: text || '',
+      imageData: imageData || undefined,
+      voiceData: voiceData || undefined,
+      imageName: imageName || undefined,
+      userId,
+      displayName: displayName || 'Student',
+      userEmail: userEmail || '',
+      isAdmin: finalIsAdmin,
+      createdAt: new Date().toISOString(),
+    });
+    res.json({ success: true, messageId: msg._id.toString() });
+  } catch (err) {
+    console.error('Community message error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/community-clear  – admin wipes the room
+app.post('/api/community-clear', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    if (!COMMUNITY_ADMIN_UIDS.includes(uid)) {
+      return res.status(403).json({ success: false, error: 'Admin only' });
+    }
+    await ChatMessage.deleteMany({});
+    await ChatMessage.create({
+      type: 'text',
+      text: 'Chat cleared by admin. Welcome! 🎓',
+      userId: uid,
+      displayName: 'JambGenius Boss',
+      userEmail: '',
+      isAdmin: true,
+      createdAt: new Date().toISOString(),
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Community clear error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Paystack payment callback - user returns here after paying
 // Auto-verifies and credits account, then redirects to exam
 app.get('/api/payment-callback', async (req, res) => {
