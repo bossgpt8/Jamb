@@ -103,10 +103,11 @@ export default function PracticeExam() {
       const opts = {}
       q.options.forEach((o, i) => { opts[String.fromCharCode(65 + i)] = o })
       const userAnswerIdx = selected[qIdx]
-      const res = await fetch('/api/gemini-explain', {
+      const res = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'explain',
           question: q.question,
           options: opts,
           correctAnswer: q.options[q.answer],
