@@ -20,6 +20,14 @@ class NotificationManager {
       this.preferences = JSON.parse(savedPrefs);
     }
 
+    // Capture Expo push token injected by the mobile app
+    const saveToken = (token) => {
+      if (!token) return;
+      this.registerExpoPushToken(token);
+    };
+    if (window.__expoPushToken) saveToken(window.__expoPushToken);
+    window.addEventListener('expoPushToken', (e) => saveToken(e.detail));
+
     // Check if running on mobile app
     if (this.isApp()) {
       this.setupAppNotifications();
@@ -66,6 +74,24 @@ class NotificationManager {
       }
     } catch (error) {
       console.error('Error registering with server:', error);
+    }
+  }
+
+  // Register Expo push token received from the mobile app
+  async registerExpoPushToken(token) {
+    const userId = this.getCurrentUserId();
+    if (!userId) return;
+    try {
+      const response = await fetch('/api/notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register-token', userId, expoPushToken: token })
+      });
+      if (!response.ok) {
+        console.error('Failed to register Expo push token:', response.status);
+      }
+    } catch (error) {
+      console.error('Error registering Expo push token:', error);
     }
   }
 
@@ -117,7 +143,7 @@ class NotificationManager {
           title: '📚 Daily Study Time!',
           body: 'Time to practice! Keep your streak alive 🔥',
           type: 'reminder',
-          deepLink: '/practice'
+          deepLink: 'https://jambgenius.app/practice'
         })
       });
     } catch (error) {
@@ -142,7 +168,7 @@ class NotificationManager {
           title: `💬 ${senderName}`,
           body: message.substring(0, 100),
           type: 'chat',
-          deepLink: '/chatroom'
+          deepLink: 'https://jambgenius.app/chatroom'
         })
       });
     } catch (error) {
@@ -167,7 +193,7 @@ class NotificationManager {
           title: `📝 ${title}`,
           body: message,
           type: 'exam',
-          deepLink: '/exam'
+          deepLink: 'https://jambgenius.app/exam'
         })
       });
     } catch (error) {

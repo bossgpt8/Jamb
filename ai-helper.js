@@ -9,12 +9,13 @@ class AIHelper {
     this.isLoading = true;
 
     try {
-      const response = await fetch('/api/gemini-explain', {
+      const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          action: 'explain',
           question: question,
           options: options,
           correctAnswer: correctAnswer,

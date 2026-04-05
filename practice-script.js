@@ -636,10 +636,11 @@ document.getElementById('aiExplainBtn')?.addEventListener('click', async () => {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Loading...';
     
     try {
-        const response = await fetch('/api/gemini-explain', {
+        const response = await fetch('/api/gemini', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                action: 'explain',
                 question: question.question,
                 options: {
                     A: question.option_a,

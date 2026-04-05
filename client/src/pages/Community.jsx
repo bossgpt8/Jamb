@@ -173,10 +173,10 @@ export default function Community() {
     if (shouldCallAI) {
       setSending(true)
       try {
-        const aiRes = await fetch('/api/gemini-chat', {
+        const aiRes = await fetch('/api/gemini', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: text.replace(/@boss/gi, '').trim() || text }),
+          body: JSON.stringify({ action: 'chat', question: text.replace(/@boss/gi, '').trim() || text }),
         })
         const aiData = await aiRes.json()
         const answer = aiData.answer || 'I could not answer that right now.'
