@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
+import AdminRoute from './components/AdminRoute'
 import Home from './pages/Home'
 import Practice from './pages/Practice'
 import PracticeExam from './pages/PracticeExam'
@@ -22,9 +23,17 @@ import ContactUs from './pages/ContactUs'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
 import SampleQuestions from './pages/SampleQuestions'
+import AdminDashboard from './pages/AdminDashboard'
 import AdminNotifications from './pages/AdminNotifications'
+import AdminUsers from './pages/AdminUsers'
+import AdminContent from './pages/AdminContent'
+import AdminAnalytics from './pages/AdminAnalytics'
+import AdminPayments from './pages/AdminPayments'
+import AdminSupport from './pages/AdminSupport'
+import AdminConfig from './pages/AdminConfig'
 
 const protect = (component) => <ProtectedRoute>{component}</ProtectedRoute>
+const adminOnly = (component) => <AdminRoute>{component}</AdminRoute>
 
 export default function App() {
   return (
@@ -52,7 +61,14 @@ export default function App() {
             <Route path="contact" element={<ContactUs />} />
             <Route path="privacy" element={<Privacy />} />
             <Route path="terms" element={<Terms />} />
-            <Route path="admin/notifications" element={protect(<AdminNotifications />)} />
+            <Route path="admin" element={adminOnly(<AdminDashboard />)} />
+            <Route path="admin/notifications" element={adminOnly(<AdminNotifications />)} />
+            <Route path="admin/users" element={adminOnly(<AdminUsers />)} />
+            <Route path="admin/content" element={adminOnly(<AdminContent />)} />
+            <Route path="admin/analytics" element={adminOnly(<AdminAnalytics />)} />
+            <Route path="admin/payments" element={adminOnly(<AdminPayments />)} />
+            <Route path="admin/support" element={adminOnly(<AdminSupport />)} />
+            <Route path="admin/config" element={adminOnly(<AdminConfig />)} />
           </Route>
         </Routes>
       </AuthProvider>

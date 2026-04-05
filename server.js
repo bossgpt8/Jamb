@@ -7,6 +7,8 @@ const { connectDB } = require('./db/mongoose');
 const User = require('./models/User');
 const ChatMessage = require('./models/ChatMessage');
 const Question = require('./models/Question');
+const Feedback = require('./models/Feedback');
+const AppConfig = require('./models/AppConfig');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -79,6 +81,32 @@ async function verifyFirebaseToken(idToken) {
   return payload.sub; // return uid
 }
 
+// ─── Admin Middleware ─────────────────────────────────────────────────────────
+// Returns the verified uid if the caller is an admin, otherwise sends a 401/403
+// and returns null. Checks DB role OR legacy hardcoded UID list.
+const LEGACY_ADMIN_UIDS = (process.env.ADMIN_UIDS || 'rrn9hbDxmaNmjiu2GhxGi6yyS8v2').split(',');
+
+async function requireAdmin(req, res) {
+  const idToken = req.body?.idToken || req.headers?.['x-id-token'];
+  if (!idToken) { res.status(401).json({ success: false, error: 'Auth required' }); return null; }
+  let uid;
+  try {
+    uid = await verifyFirebaseToken(idToken);
+  } catch {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return null;
+  }
+  // Allow legacy hardcoded UIDs for backward compatibility
+  if (LEGACY_ADMIN_UIDS.includes(uid)) return uid;
+  try {
+    const user = await User.findOne({ uid }, 'role');
+    if (user && user.role === 'admin') return uid;
+  } catch (err) {
+    console.error('requireAdmin DB error:', err.message);
+  }
+  res.status(403).json({ success: false, error: 'Forbidden: Admin only' });
+  return null;
+}
 
 // ─── DEBUG ENDPOINT (remove after testing) ───────────────────────────────────
 app.get('/api/debug', async (req, res) => {
@@ -1438,8 +1466,6 @@ app.post('/api/chat-reactions', async (req, res) => {
 
 // ─── Community Chat (shared, persistent) ────────────────────────────────────
 
-const COMMUNITY_ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2'];
-
 // GET  /api/community-messages  – last 100 messages
 app.get('/api/community-messages', async (req, res) => {
   try {
@@ -1476,7 +1502,13 @@ app.post('/api/community-messages', async (req, res) => {
   if (idToken) {
     try {
       userId = await verifyFirebaseToken(idToken);
-      isAdminUser = COMMUNITY_ADMIN_UIDS.includes(userId);
+      // Check DB role or legacy UID list for admin flag
+      if (LEGACY_ADMIN_UIDS.includes(userId)) {
+        isAdminUser = true;
+      } else {
+        const userDoc = await User.findOne({ uid: userId }, 'role').lean();
+        isAdminUser = userDoc?.role === 'admin';
+      }
     } catch {
       if (type !== 'text') {
         return res.status(401).json({ success: false, error: 'Auth required for media messages' });
@@ -1510,13 +1542,9 @@ app.post('/api/community-messages', async (req, res) => {
 
 // POST /api/community-clear  – admin wipes the room
 app.post('/api/community-clear', async (req, res) => {
-  const { idToken } = req.body;
-  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
   try {
-    const uid = await verifyFirebaseToken(idToken);
-    if (!COMMUNITY_ADMIN_UIDS.includes(uid)) {
-      return res.status(403).json({ success: false, error: 'Admin only' });
-    }
     await ChatMessage.deleteMany({});
     await ChatMessage.create({
       type: 'text',
@@ -1600,9 +1628,420 @@ app.get('/api/payment-callback', async (req, res) => {
   }
 });
 
+// ─── Contact / Support Tickets ───────────────────────────────────────────────
+
+app.post('/api/contact', async (req, res) => {
+  const { name, email, subject, message, idToken } = req.body;
+  if (!name || !email || !subject || !message) {
+    return res.status(400).json({ success: false, error: 'All fields are required' });
+  }
+  try {
+    let uid;
+    if (idToken) {
+      try { uid = await verifyFirebaseToken(idToken); } catch { /* anonymous allowed */ }
+    }
+    await Feedback.create({ uid, name, email, subject, message });
+    res.json({ success: true, message: 'Feedback submitted' });
+  } catch (err) {
+    console.error('Contact error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Admin Routes ─────────────────────────────────────────────────────────────
+
+// ── User Management ──────────────────────────────────────────────────────────
+
+// GET /api/admin/users  – paginated user list with optional search
+app.get('/api/admin/users', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { search, page = 1, limit = 20 } = req.query;
+    const query = {};
+    if (search) {
+      const re = new RegExp(search, 'i');
+      query.$or = [{ email: re }, { displayName: re }, { fullName: re }, { uid: re }];
+    }
+    const skip = (Number(page) - 1) * Number(limit);
+    const [users, total] = await Promise.all([
+      User.find(query, '-reactions -bookmarks -paymentHistory -examResults')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      User.countDocuments(query)
+    ]);
+    res.json({ success: true, users, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    console.error('Admin list users error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/users/:uid/role  – promote/demote
+app.patch('/api/admin/users/:targetUid/role', async (req, res) => {
+  const adminUid = await requireAdmin(req, res);
+  if (!adminUid) return;
+  const { role } = req.body;
+  if (!['user', 'admin'].includes(role)) {
+    return res.status(400).json({ success: false, error: 'Invalid role' });
+  }
+  try {
+    const updated = await User.findOneAndUpdate(
+      { uid: req.params.targetUid },
+      { $set: { role } },
+      { new: true, select: 'uid email displayName role isActive' }
+    );
+    if (!updated) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true, user: updated });
+  } catch (err) {
+    console.error('Admin set role error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/users/:uid/status  – activate/deactivate
+app.patch('/api/admin/users/:targetUid/status', async (req, res) => {
+  const adminUid = await requireAdmin(req, res);
+  if (!adminUid) return;
+  const { isActive } = req.body;
+  if (typeof isActive !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'isActive must be boolean' });
+  }
+  try {
+    const updated = await User.findOneAndUpdate(
+      { uid: req.params.targetUid },
+      { $set: { isActive } },
+      { new: true, select: 'uid email displayName role isActive' }
+    );
+    if (!updated) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true, user: updated });
+  } catch (err) {
+    console.error('Admin set status error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/users/:uid/credits  – manually grant/revoke exam credits
+app.patch('/api/admin/users/:targetUid/credits', async (req, res) => {
+  const adminUid = await requireAdmin(req, res);
+  if (!adminUid) return;
+  const { credits } = req.body;
+  if (typeof credits !== 'number') {
+    return res.status(400).json({ success: false, error: 'credits must be a number' });
+  }
+  try {
+    const updated = await User.findOneAndUpdate(
+      { uid: req.params.targetUid },
+      { $set: { examCredits: credits } },
+      { new: true, select: 'uid email displayName examCredits' }
+    );
+    if (!updated) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true, user: updated });
+  } catch (err) {
+    console.error('Admin set credits error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/users/:uid  – delete user and their data
+app.delete('/api/admin/users/:targetUid', async (req, res) => {
+  const adminUid = await requireAdmin(req, res);
+  if (!adminUid) return;
+  if (req.params.targetUid === adminUid) {
+    return res.status(400).json({ success: false, error: 'Cannot delete your own account' });
+  }
+  try {
+    const result = await User.deleteOne({ uid: req.params.targetUid });
+    if (result.deletedCount === 0) return res.status(404).json({ success: false, error: 'User not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Admin delete user error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Content Management ────────────────────────────────────────────────────────
+
+// GET /api/admin/questions  – paginated question list
+app.get('/api/admin/questions', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { subject, search, page = 1, limit = 20 } = req.query;
+    const query = {};
+    if (subject) query.subject = subject.toLowerCase();
+    if (search) {
+      const re = new RegExp(search, 'i');
+      query.$or = [{ question: re }, { topic: re }];
+    }
+    const skip = (Number(page) - 1) * Number(limit);
+    const [questions, total] = await Promise.all([
+      Question.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+      Question.countDocuments(query)
+    ]);
+    res.json({ success: true, questions, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    console.error('Admin list questions error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/questions  – create a question
+app.post('/api/admin/questions', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { subject, question, option_a, option_b, option_c, option_d, correct_answer, explanation, year, topic, diagram_url } = req.body;
+    if (!subject || !question || !correct_answer) {
+      return res.status(400).json({ success: false, error: 'subject, question, and correct_answer are required' });
+    }
+    const created = await Question.create({ subject: subject.toLowerCase().trim(), question, option_a, option_b, option_c, option_d, correct_answer, explanation, year, topic, diagram_url });
+    res.status(201).json({ success: true, question: created });
+  } catch (err) {
+    console.error('Admin create question error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/admin/questions/:id  – update a question
+app.put('/api/admin/questions/:id', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { subject, question, option_a, option_b, option_c, option_d, correct_answer, explanation, year, topic, diagram_url } = req.body;
+    const update = {};
+    if (subject !== undefined) update.subject = subject.toLowerCase().trim();
+    if (question !== undefined) update.question = question;
+    if (option_a !== undefined) update.option_a = option_a;
+    if (option_b !== undefined) update.option_b = option_b;
+    if (option_c !== undefined) update.option_c = option_c;
+    if (option_d !== undefined) update.option_d = option_d;
+    if (correct_answer !== undefined) update.correct_answer = correct_answer;
+    if (explanation !== undefined) update.explanation = explanation;
+    if (year !== undefined) update.year = year;
+    if (topic !== undefined) update.topic = topic;
+    if (diagram_url !== undefined) update.diagram_url = diagram_url;
+    const updated = await Question.findByIdAndUpdate(req.params.id, { $set: update }, { new: true });
+    if (!updated) return res.status(404).json({ success: false, error: 'Question not found' });
+    res.json({ success: true, question: updated });
+  } catch (err) {
+    console.error('Admin update question error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/questions/:id  – delete a question
+app.delete('/api/admin/questions/:id', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const result = await Question.findByIdAndDelete(req.params.id);
+    if (!result) return res.status(404).json({ success: false, error: 'Question not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Admin delete question error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+
+// GET /api/admin/analytics
+app.get('/api/admin/analytics', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+      totalUsers,
+      newUsersLast30,
+      newUsersLast7,
+      activeUsers,
+      totalQuestions,
+      subjectCounts,
+      totalFeedback,
+      openFeedback
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ createdAt: { $gte: thirtyDaysAgo } }),
+      User.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
+      User.countDocuments({ isActive: { $ne: false } }),
+      Question.countDocuments(),
+      Question.aggregate([{ $group: { _id: '$subject', count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
+      Feedback.countDocuments(),
+      Feedback.countDocuments({ status: 'open' })
+    ]);
+
+    // Exam attempt stats from embedded examResults arrays
+    const examStats = await User.aggregate([
+      { $unwind: '$examResults' },
+      {
+        $group: {
+          _id: null,
+          totalAttempts: { $sum: 1 },
+          avgScore: { $avg: '$examResults.percentage' },
+          passed: { $sum: { $cond: [{ $gte: ['$examResults.percentage', 50] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $lt: ['$examResults.percentage', 50] }, 1, 0] } }
+        }
+      }
+    ]);
+
+    const examData = examStats[0] || { totalAttempts: 0, avgScore: 0, passed: 0, failed: 0 };
+
+    res.json({
+      success: true,
+      analytics: {
+        users: { total: totalUsers, newLast30Days: newUsersLast30, newLast7Days: newUsersLast7, active: activeUsers },
+        questions: { total: totalQuestions, bySubject: subjectCounts },
+        exams: {
+          totalAttempts: examData.totalAttempts,
+          avgScorePercent: Math.round((examData.avgScore || 0) * 10) / 10,
+          passed: examData.passed,
+          failed: examData.failed,
+          passRate: examData.totalAttempts > 0 ? Math.round((examData.passed / examData.totalAttempts) * 100) : 0
+        },
+        feedback: { total: totalFeedback, open: openFeedback }
+      }
+    });
+  } catch (err) {
+    console.error('Admin analytics error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Payments ──────────────────────────────────────────────────────────────────
+
+// GET /api/admin/payments  – paginated transaction history across all users
+app.get('/api/admin/payments', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+    const users = await User.find(
+      { 'paymentHistory.0': { $exists: true } },
+      'uid email displayName paymentHistory examCredits'
+    ).lean();
+
+    // Flatten all payment entries with user context
+    const allPayments = users.flatMap(u =>
+      (u.paymentHistory || []).map(p => ({ ...p, userId: u.uid, userEmail: u.email, userName: u.displayName }))
+    );
+    allPayments.sort((a, b) => (b.paidAt || '') > (a.paidAt || '') ? 1 : -1);
+    const total = allPayments.length;
+    const page_data = allPayments.slice(skip, skip + Number(limit));
+    res.json({ success: true, payments: page_data, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    console.error('Admin payments error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Support / Feedback ────────────────────────────────────────────────────────
+
+// GET /api/admin/feedback
+app.get('/api/admin/feedback', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { status, page = 1, limit = 20 } = req.query;
+    const query = status ? { status } : {};
+    const skip = (Number(page) - 1) * Number(limit);
+    const [tickets, total] = await Promise.all([
+      Feedback.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
+      Feedback.countDocuments(query)
+    ]);
+    res.json({ success: true, tickets, total, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    console.error('Admin feedback error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/feedback/:id/resolve
+app.patch('/api/admin/feedback/:id/resolve', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { notes } = req.body;
+    const updated = await Feedback.findByIdAndUpdate(
+      req.params.id,
+      { $set: { status: 'resolved', resolvedAt: new Date().toISOString(), notes: notes || '' } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    res.json({ success: true, ticket: updated });
+  } catch (err) {
+    console.error('Admin resolve feedback error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/admin/feedback/:id/reopen
+app.patch('/api/admin/feedback/:id/reopen', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const updated = await Feedback.findByIdAndUpdate(
+      req.params.id,
+      { $set: { status: 'open', resolvedAt: null, notes: '' } },
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ success: false, error: 'Ticket not found' });
+    res.json({ success: true, ticket: updated });
+  } catch (err) {
+    console.error('Admin reopen feedback error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── App Config ────────────────────────────────────────────────────────────────
+
+// GET /api/admin/config
+app.get('/api/admin/config', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    let config = await AppConfig.findOne({ key: 'global' }).lean();
+    if (!config) {
+      config = await AppConfig.create({ key: 'global' });
+    }
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('Admin get config error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/admin/config
+app.put('/api/admin/config', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const { maintenanceMode, featureFlags, perTierFeatures } = req.body;
+    const update = {};
+    if (maintenanceMode !== undefined) update.maintenanceMode = Boolean(maintenanceMode);
+    if (featureFlags && typeof featureFlags === 'object') update.featureFlags = featureFlags;
+    if (perTierFeatures && typeof perTierFeatures === 'object') update.perTierFeatures = perTierFeatures;
+    const config = await AppConfig.findOneAndUpdate(
+      { key: 'global' },
+      { $set: update },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('Admin update config error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // SPA Fallback Route - Serve index.html for all non-API requests
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api/') || /\.\w+$/.test(req.path)) {
+app.get('*', (req, res) => {  if (req.path.startsWith('/api/') || /\.\w+$/.test(req.path)) {
     return res.status(404).json({ error: 'Not found' });
   }
 
