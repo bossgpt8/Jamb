@@ -93,7 +93,7 @@ module.exports = async function handler(req, res) {
 
     // ── send ──────────────────────────────────────────────────────────────────
     if (action === 'send') {
-      const { userId, title, body, data } = req.body;
+      const { userId, title, body, data, deepLink, type } = req.body;
       if (!userId || !title || !body) {
         return res.status(400).json({ error: 'userId, title and body are required' });
       }
@@ -104,7 +104,8 @@ module.exports = async function handler(req, res) {
         return res.status(404).json({ error: 'No push token found for this user' });
       }
 
-      const results = await sendExpoPush([record.expoPushToken], title, body, data || {});
+      const notifData = { ...(data || {}), ...(deepLink && { url: deepLink }), ...(type && { type }) };
+      const results = await sendExpoPush([record.expoPushToken], title, body, notifData);
       console.log(`✅ Push notification sent to user ${safeUserId}`);
       return res.status(200).json({ success: true, results });
     }
