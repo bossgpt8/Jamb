@@ -22,6 +22,7 @@ import ContactUs from './pages/ContactUs'
 import Privacy from './pages/Privacy'
 import Terms from './pages/Terms'
 import SampleQuestions from './pages/SampleQuestions'
+import AdminNotifications from './pages/AdminNotifications'
 
 const protect = (component) => <ProtectedRoute>{component}</ProtectedRoute>
 
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="contact" element={<ContactUs />} />
             <Route path="privacy" element={<Privacy />} />
             <Route path="terms" element={<Terms />} />
+            <Route path="admin/notifications" element={protect(<AdminNotifications />)} />
           </Route>
         </Routes>
       </AuthProvider>
