@@ -86,6 +86,11 @@ async function verifyFirebaseToken(idToken) {
 // and returns null. Checks DB role OR legacy hardcoded UID list.
 const LEGACY_ADMIN_UIDS = (process.env.ADMIN_UIDS || 'rrn9hbDxmaNmjiu2GhxGi6yyS8v2').split(',');
 
+// Escape special regex characters to prevent regex injection
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 async function requireAdmin(req, res) {
   const idToken = req.body?.idToken || req.headers?.['x-id-token'];
   if (!idToken) { res.status(401).json({ success: false, error: 'Auth required' }); return null; }
@@ -1660,7 +1665,7 @@ app.get('/api/admin/users', async (req, res) => {
     const { search, page = 1, limit = 20 } = req.query;
     const query = {};
     if (search) {
-      const re = new RegExp(search, 'i');
+      const re = new RegExp(escapeRegex(search), 'i');
       query.$or = [{ email: re }, { displayName: re }, { fullName: re }, { uid: re }];
     }
     const skip = (Number(page) - 1) * Number(limit);
@@ -1773,7 +1778,7 @@ app.get('/api/admin/questions', async (req, res) => {
     const query = {};
     if (subject) query.subject = subject.toLowerCase();
     if (search) {
-      const re = new RegExp(search, 'i');
+      const re = new RegExp(escapeRegex(search), 'i');
       query.$or = [{ question: re }, { topic: re }];
     }
     const skip = (Number(page) - 1) * Number(limit);
@@ -1932,7 +1937,7 @@ app.get('/api/admin/payments', async (req, res) => {
     const allPayments = users.flatMap(u =>
       (u.paymentHistory || []).map(p => ({ ...p, userId: u.uid, userEmail: u.email, userName: u.displayName }))
     );
-    allPayments.sort((a, b) => (b.paidAt || '') > (a.paidAt || '') ? 1 : -1);
+    allPayments.sort((a, b) => new Date(b.paidAt || 0) - new Date(a.paidAt || 0));
     const total = allPayments.length;
     const page_data = allPayments.slice(skip, skip + Number(limit));
     res.json({ success: true, payments: page_data, total, page: Number(page), limit: Number(limit) });
@@ -1950,7 +1955,8 @@ app.get('/api/admin/feedback', async (req, res) => {
   if (!uid) return;
   try {
     const { status, page = 1, limit = 20 } = req.query;
-    const query = status ? { status } : {};
+    const ALLOWED_STATUSES = ['open', 'resolved'];
+    const query = (status && ALLOWED_STATUSES.includes(status)) ? { status } : {};
     const skip = (Number(page) - 1) * Number(limit);
     const [tickets, total] = await Promise.all([
       Feedback.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
