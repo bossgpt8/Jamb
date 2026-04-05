@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { auth } from '../firebase'
-import { onAuthStateChanged } from 'firebase/auth'
 
 export default function AdminNotifications() {
   const navigate = useNavigate()
-  const [user, setUser] = useState(null)
-  const [isAdmin, setIsAdmin] = useState(false)
 
   // form state
   const [mode, setMode] = useState('broadcast') // 'broadcast' | 'send'
@@ -21,28 +18,7 @@ export default function AdminNotifications() {
 
   useEffect(() => {
     document.title = 'Admin – Send Notifications | JambGenius'
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (!u) { navigate('/'); return }
-      try {
-        const idToken = await u.getIdToken()
-        const res = await fetch('/api/get-user-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken })
-        })
-        const data = await res.json()
-        if (data.success && data.profile?.role === 'admin') {
-          setUser(u)
-          setIsAdmin(true)
-        } else {
-          navigate('/')
-        }
-      } catch {
-        navigate('/')
-      }
-    })
-    return () => unsubscribe()
-  }, [navigate])
+  }, [])
 
   const handleSend = async (e) => {
     e.preventDefault()
@@ -78,14 +54,6 @@ export default function AdminNotifications() {
       setResult({ ok: false, message: `❌ Network error: ${err.message}` })
     }
     setSending(false)
-  }
-
-  if (!isAdmin) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
-      </div>
-    )
   }
 
   return (
