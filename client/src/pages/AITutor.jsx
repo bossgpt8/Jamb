@@ -72,7 +72,7 @@ export default function AITutor() {
   const canSend = !loading && input.trim().length > 0
 
   return (
-    <div className="flex flex-col overflow-hidden bg-gray-50 font-sans page-fade-in" style={{ height: 'calc(100vh - 65px)' }}>
+    <div className="flex flex-col overflow-hidden bg-gray-50 font-sans page-fade-in" style={{ height: 'calc(100vh - var(--bottom-nav-height))' }}>
 
       {/* ── Top Navigation ── */}
       <nav className="bg-white shadow-sm border-b border-gray-200 z-50 flex-shrink-0">
