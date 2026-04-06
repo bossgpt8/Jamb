@@ -4,6 +4,12 @@
   "outputDirectory": "client/dist",
   "framework": null,
   "rewrites": [
+    { "source": "/api/upsert-user", "destination": "/api/user?action=upsert-user" },
+    { "source": "/api/get-user-profile", "destination": "/api/user?action=get-user-profile" },
+    { "source": "/api/get-credits", "destination": "/api/user?action=get-credits" },
+    { "source": "/api/initiate-payment", "destination": "/api/payment?action=initiate" },
+    { "source": "/api/verify-payment", "destination": "/api/payment?action=verify" },
+    { "source": "/api/payment-callback", "destination": "/api/payment?action=callback" },
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
