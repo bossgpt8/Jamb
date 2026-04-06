@@ -18,6 +18,22 @@ export function AuthProvider({ children }) {
         setProfileLoading(true)
         try {
           const idToken = await u.getIdToken()
+          // Ensure user profile exists in DB and email is stored for admin detection
+          try {
+            const upsertRes = await fetch('/api/upsert-user', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                idToken,
+                email: u.email || '',
+                displayName: u.displayName || u.email?.split('@')[0] || '',
+                photoURL: u.photoURL || ''
+              })
+            })
+            if (!upsertRes.ok) console.warn('upsert-user failed:', upsertRes.status)
+          } catch (upsertErr) {
+            console.warn('upsert-user error:', upsertErr)
+          }
           const res = await fetch('/api/get-user-profile', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

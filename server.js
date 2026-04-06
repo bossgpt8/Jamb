@@ -99,6 +99,22 @@ function getTokenEmail(idToken) {
   return payload?.email ? payload.email.toLowerCase() : null;
 }
 
+// Returns true if the given uid/email combination qualifies as an admin.
+// Checks (in order): legacy UID list, JWT/provided email list, DB role, DB stored email.
+async function checkIsAdmin(uid, tokenEmail, emailArg) {
+  if (LEGACY_ADMIN_UIDS.includes(uid)) return true;
+  if (tokenEmail && LEGACY_ADMIN_EMAILS.includes(tokenEmail)) return true;
+  if (emailArg && LEGACY_ADMIN_EMAILS.includes(emailArg.toLowerCase())) return true;
+  try {
+    const user = await User.findOne({ uid }, 'role email');
+    if (user?.role === 'admin') return true;
+    if (user?.email && LEGACY_ADMIN_EMAILS.includes(user.email.toLowerCase())) return true;
+  } catch (err) {
+    console.error('checkIsAdmin DB error:', err.message);
+  }
+  return false;
+}
+
 async function requireAdmin(req, res) {
   const idToken = req.body?.idToken || req.headers?.['x-id-token'];
   if (!idToken) { res.status(401).json({ success: false, error: 'Auth required' }); return null; }
@@ -109,18 +125,8 @@ async function requireAdmin(req, res) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return null;
   }
-  // Allow legacy hardcoded UIDs for backward compatibility
-  if (LEGACY_ADMIN_UIDS.includes(uid)) return uid;
-  // Allow admin emails from the JWT claim
   const tokenEmail = getTokenEmail(idToken);
-  if (tokenEmail && LEGACY_ADMIN_EMAILS.includes(tokenEmail)) return uid;
-  try {
-    const user = await User.findOne({ uid }, 'role email');
-    if (user && user.role === 'admin') return uid;
-    if (user?.email && LEGACY_ADMIN_EMAILS.includes(user.email.toLowerCase())) return uid;
-  } catch (err) {
-    console.error('requireAdmin DB error:', err.message);
-  }
+  if (await checkIsAdmin(uid, tokenEmail, null)) return uid;
   res.status(403).json({ success: false, error: 'Forbidden: Admin only' });
   return null;
 }
@@ -1259,9 +1265,13 @@ app.post('/api/upsert-user', async (req, res) => {
   if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
   try {
     const uid = await verifyFirebaseToken(idToken);
+    const tokenEmail = getTokenEmail(idToken);
+    const isAdmin = await checkIsAdmin(uid, tokenEmail, email || null);
+    const updateFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString() };
+    if (isAdmin) updateFields.role = 'admin';
     await User.findOneAndUpdate(
       { uid },
-      { $set: { email, displayName, photoURL, lastLoginAt: new Date().toISOString() } },
+      { $set: updateFields },
       { upsert: true, new: true }
     );
     res.json({ success: true });
@@ -1278,23 +1288,23 @@ app.post('/api/get-user-profile', async (req, res) => {
   try {
     const uid = await verifyFirebaseToken(idToken);
     const tokenEmail = getTokenEmail(idToken);
-    const isLegacyAdmin = LEGACY_ADMIN_UIDS.includes(uid) ||
-      (tokenEmail && LEGACY_ADMIN_EMAILS.includes(tokenEmail));
     const user = await User.findOne({ uid });
-    // Ensure legacy admin UIDs/emails always surface as role:'admin' even if the DB
-    // record still has the default role:'user' value.
-    if (user && isLegacyAdmin && user.role !== 'admin') {
-      user.role = 'admin';
-    }
-    // Also check admin by stored email in the DB document
-    if (user && user.email && LEGACY_ADMIN_EMAILS.includes(user.email.toLowerCase()) && user.role !== 'admin') {
-      user.role = 'admin';
+    // Ensure admin users always surface as role:'admin', persisting to DB if needed
+    if (user && user.role !== 'admin') {
+      const isAdmin = await checkIsAdmin(uid, tokenEmail, user.email || null);
+      if (isAdmin) {
+        user.role = 'admin';
+        await user.save();
+      }
     }
     const profile = user ? user.toObject() : null;
-    // Also mark legacy admins who don't yet have a DB document
-    if (!profile && isLegacyAdmin) {
-      res.json({ success: true, profile: { role: 'admin' } });
-      return;
+    // Also mark admins who don't yet have a DB document
+    if (!profile) {
+      const isAdmin = await checkIsAdmin(uid, tokenEmail, null);
+      if (isAdmin) {
+        res.json({ success: true, profile: { role: 'admin' } });
+        return;
+      }
     }
     res.json({ success: true, profile });
   } catch (err) {
