@@ -1267,8 +1267,7 @@ app.post('/api/upsert-user', async (req, res) => {
     const uid = await verifyFirebaseToken(idToken);
     const tokenEmail = getTokenEmail(idToken);
     const isAdmin = await checkIsAdmin(uid, tokenEmail, email || null);
-    const updateFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString() };
-    if (isAdmin) updateFields.role = 'admin';
+    const updateFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString(), role: isAdmin ? 'admin' : 'user' };
     await User.findOneAndUpdate(
       { uid },
       { $set: updateFields },
