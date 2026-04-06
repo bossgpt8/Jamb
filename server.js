@@ -96,6 +96,9 @@ const ENV_ADMIN_EMAILS = process.env.ADMIN_EMAILS
 const LEGACY_ADMIN_UIDS = [...new Set([...DEFAULT_ADMIN_UIDS, ...ENV_ADMIN_UIDS])];
 const LEGACY_ADMIN_EMAILS = [...new Set([...DEFAULT_ADMIN_EMAILS, ...ENV_ADMIN_EMAILS])];
 
+// Admin users always have this many credits (never deducted)
+const ADMIN_EXAM_CREDITS = 999999;
+
 // Escape special regex characters to prevent regex injection
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -137,6 +140,20 @@ async function requireAdmin(req, res) {
   if (await checkIsAdmin(uid, tokenEmail, null)) return uid;
   res.status(403).json({ success: false, error: 'Forbidden: Admin only' });
   return null;
+}
+
+// Checks if the caller is an admin and, if so, records the exam start time and
+// sends a credit-consume response with unlimited credits.  Returns true if the
+// bypass was applied (caller should return immediately), false otherwise.
+async function applyAdminCreditBypass(uid, tokenEmail, userEmail, res) {
+  if (!(await checkIsAdmin(uid, tokenEmail, userEmail || null))) return false;
+  await User.updateOne({ uid }, { $set: { lastExamStartedAt: new Date().toISOString() } });
+  res.json({
+    success: true,
+    message: 'Exam credit consumed',
+    data: { previousCredits: ADMIN_EXAM_CREDITS, remainingCredits: ADMIN_EXAM_CREDITS }
+  });
+  return true;
 }
 
 // ─── DEBUG ENDPOINT (remove after testing) ───────────────────────────────────
@@ -533,6 +550,10 @@ app.post('/api/consume-credit', async (req, res) => {
       });
     }
 
+    // Admins have unlimited credits — skip deduction entirely
+    const tokenEmail = getTokenEmail(idToken);
+    if (await applyAdminCreditBypass(uid, tokenEmail, user.email, res)) return;
+
     const currentCredits = Number(user.examCredits) || 0;
 
     if (currentCredits <= 0) {
@@ -595,6 +616,11 @@ app.post('/api/get-credits', async (req, res) => {
 
   try {
     if (action === 'consume') {
+      // Admins have unlimited credits — skip deduction entirely
+      const tokenEmail = getTokenEmail(idToken);
+      const userDoc = await User.findOne({ uid }, 'email role');
+      if (await applyAdminCreditBypass(uid, tokenEmail, userDoc?.email, res)) return;
+
       const updatedUser = await User.findOneAndUpdate(
         { uid, examCredits: { $gt: 0 } },
         {
@@ -620,6 +646,11 @@ app.post('/api/get-credits', async (req, res) => {
     }
 
     const user = await User.findOne({ uid });
+    // Admins always have unlimited credits
+    const tokenEmail = getTokenEmail(idToken);
+    if (await checkIsAdmin(uid, tokenEmail, user?.email || null)) {
+      return res.json({ success: true, credits: ADMIN_EXAM_CREDITS });
+    }
     const credits = user ? (Number(user.examCredits) || 0) : 0;
     res.json({ success: true, credits });
   } catch (error) {
@@ -1283,8 +1314,9 @@ app.post('/api/upsert-user', async (req, res) => {
     const profileFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString() };
     const update = { $set: profileFields };
     if (isAdmin) {
-      // Promote to admin on both insert and update
+      // Promote to admin on both insert and update; ensure unlimited credits
       update.$set.role = 'admin';
+      update.$set.examCredits = ADMIN_EXAM_CREDITS;
     } else {
       // Only set 'user' role when creating a new document; never overwrite an existing role
       update.$setOnInsert = { role: 'user' };
@@ -2116,6 +2148,44 @@ app.put('/api/admin/config', async (req, res) => {
     console.error('Admin update config error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// GET /api/admin/check  – returns {isAdmin: true/false} for the authenticated user
+app.get('/api/admin/check', async (req, res) => {
+  const idToken = req.headers?.['x-id-token'] || req.query?.idToken;
+  if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
+  try {
+    const uid = await verifyFirebaseToken(idToken);
+    const tokenEmail = getTokenEmail(idToken);
+    const isAdmin = await checkIsAdmin(uid, tokenEmail, null);
+    res.json({ success: true, isAdmin });
+  } catch (err) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+});
+
+// POST /api/admin/topup  – resets the caller's own exam credits to 999999
+app.post('/api/admin/topup', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    await User.findOneAndUpdate(
+      { uid },
+      { $set: { examCredits: ADMIN_EXAM_CREDITS } },
+      { new: true }
+    );
+    res.json({ success: true, message: `Credits reset to ${ADMIN_EXAM_CREDITS}`, credits: ADMIN_EXAM_CREDITS });
+  } catch (err) {
+    console.error('Admin topup error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/emails  – returns the current list of admin emails
+app.get('/api/admin/emails', async (req, res) => {
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  res.json({ success: true, emails: LEGACY_ADMIN_EMAILS });
 });
 
 // SPA Fallback Route - Serve index.html for all non-API requests
