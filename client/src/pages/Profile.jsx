@@ -2,14 +2,21 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { auth } from '../firebase'
 import { onAuthStateChanged, signOut, updateProfile } from 'firebase/auth'
+import { useAuth } from '../context/AuthContext'
 
 export default function Profile() {
   const navigate = useNavigate()
+  const { profile: ctxProfile, isAdmin } = useAuth()
   const [user, setUser] = useState(null)
   const [editing, setEditing] = useState(false)
   const [displayName, setDisplayName] = useState('')
   const [saving, setSaving] = useState(false)
   const [credits, setCredits] = useState(0)
+
+  useEffect(() => {
+    // Use credits from centralised profile when available
+    if (ctxProfile?.examCredits != null) setCredits(ctxProfile.examCredits)
+  }, [ctxProfile])
 
   useEffect(() => {
     document.title = 'My Profile - JambGenius'
@@ -96,6 +103,11 @@ export default function Profile() {
                   {credits > 0 && (
                     <span className="bg-green-500 text-white text-xs px-3 py-1 rounded-full">
                       <i className="fas fa-ticket-alt mr-1"></i>{credits} Exam Credit{credits > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {isAdmin && (
+                    <span className="bg-purple-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+                      <i className="fas fa-user-shield mr-1"></i>ADMIN
                     </span>
                   )}
                 </div>

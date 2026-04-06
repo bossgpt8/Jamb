@@ -1,30 +1,9 @@
-import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { auth } from '../firebase'
-import { onAuthStateChanged } from 'firebase/auth'
+import { useAuth } from '../context/AuthContext'
 
 export default function More() {
   const navigate = useNavigate()
-  const [isAdmin, setIsAdmin] = useState(false)
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (!u) { setIsAdmin(false); return }
-      try {
-        const idToken = await u.getIdToken()
-        const res = await fetch('/api/get-user-profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken })
-        })
-        const data = await res.json()
-        setIsAdmin(data.success && data.profile?.role === 'admin')
-      } catch {
-        setIsAdmin(false)
-      }
-    })
-    return () => unsubscribe()
-  }, [])
+  const { isAdmin } = useAuth()
 
   const moreItems = [
     { route: '/ai-tutor', icon: 'fa-robot', color: 'purple', bg: 'bg-purple-50', iconBg: 'bg-purple-100', iconColor: 'text-purple-600', title: 'AI Tutor', desc: 'Get instant help from our AI-powered tutor' },

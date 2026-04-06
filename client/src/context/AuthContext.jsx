@@ -6,13 +6,36 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(undefined)
+  const [profile, setProfile] = useState(null)
+  const [profileLoading, setProfileLoading] = useState(false)
   const [showSignIn, setShowSignIn] = useState(false)
   const [toast, setToast] = useState(null)
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u))
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u)
+      if (u) {
+        setProfileLoading(true)
+        try {
+          const idToken = await u.getIdToken()
+          const res = await fetch('/api/get-user-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken })
+          })
+          const data = await res.json()
+          if (data.success) setProfile(data.profile)
+        } catch {}
+        setProfileLoading(false)
+      } else {
+        setProfile(null)
+        setProfileLoading(false)
+      }
+    })
     return () => unsubscribe()
   }, [])
+
+  const isAdmin = profile?.role === 'admin'
 
   const showToast = (message, type = 'info') => {
     setToast({ message, type })
@@ -29,7 +52,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, showSignIn, setShowSignIn, toast, showToast, requireAuth }}>
+    <AuthContext.Provider value={{ user, profile, isAdmin, profileLoading, showSignIn, setShowSignIn, toast, showToast, requireAuth }}>
       {children}
     </AuthContext.Provider>
   )

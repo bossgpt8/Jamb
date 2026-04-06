@@ -5,7 +5,7 @@ import { auth } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 
 export default function UserChip() {
-  const { user, setShowSignIn } = useAuth()
+  const { user, setShowSignIn, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [credits, setCredits] = useState(null)
@@ -72,7 +72,12 @@ export default function UserChip() {
             <div className="flex items-center gap-2">
               <img src={avatarUrl} alt={displayName} className="w-9 h-9 rounded-full object-cover" />
               <div className="min-w-0">
-                <p className="font-semibold text-gray-900 text-sm truncate">{displayName}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="font-semibold text-gray-900 text-sm truncate">{displayName}</p>
+                  {isAdmin && (
+                    <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">ADMIN</span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-500 truncate">{user.email}</p>
                 {credits !== null && (
                   <p className="text-xs text-amber-600 font-medium mt-0.5">
@@ -86,6 +91,9 @@ export default function UserChip() {
             <button onClick={() => { setOpen(false); navigate('/profile') }} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-gray-700 w-full text-sm"><i className="fas fa-user w-4 text-center text-gray-400"></i>My Profile</button>
             <button onClick={() => { setOpen(false); navigate('/analytics') }} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-gray-700 w-full text-sm"><i className="fas fa-chart-line w-4 text-center text-gray-400"></i>Analytics</button>
             <button onClick={() => { setOpen(false); navigate('/notifications') }} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-gray-700 w-full text-sm"><i className="fas fa-bell w-4 text-center text-gray-400"></i>Notifications</button>
+            {isAdmin && (
+              <button onClick={() => { setOpen(false); navigate('/admin') }} className="flex items-center gap-2 px-3 py-2 hover:bg-purple-50 text-purple-700 w-full text-sm font-medium"><i className="fas fa-user-shield w-4 text-center"></i>Admin Panel</button>
+            )}
             <hr className="my-1" />
             <button onClick={() => signOut(auth)} className="flex items-center gap-2 px-3 py-2 hover:bg-red-50 text-red-600 w-full text-sm"><i className="fas fa-sign-out-alt w-4 text-center"></i>Sign Out</button>
           </div>
