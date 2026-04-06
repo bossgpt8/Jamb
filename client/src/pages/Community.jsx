@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext'
 import UserChip from '../components/UserChip'
 
 const NAME_KEY = 'jg_chat_display_name'
+const MAX_RECORDING_SECONDS = 60       // auto-stop voice recording after this many seconds
+const TARGET_AUDIO_BITRATE = 32000     // 32 kbps keeps voice note payloads small (~240 KB/min)
 
 const BOSS_SUGGESTIONS = [
   '@boss explain this topic: ',
@@ -86,6 +88,18 @@ export default function Community() {
   const getDisplayName = () => chatName || user?.displayName || user?.email?.split('@')[0] || 'Student'
   const fmtRecording = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
+  // Shared teardown for the MediaRecorder – used by both stopRecording and the auto-stop timer.
+  // Extracted as useCallback so the interval callback always captures a stable reference.
+  const cleanupRecording = useCallback(() => {
+    clearInterval(recordingTimerRef.current)
+    if (mediaRecorderRef.current?.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+    }
+    setIsRecording(false)
+    setRecordingSeconds(0)
+  }, [])
+
   // ── Fetch messages from backend ───────────────────────────────────────────
   const fetchMessages = useCallback(async () => {
     try {
@@ -139,14 +153,27 @@ export default function Community() {
   }
 
   // ── POST helper ───────────────────────────────────────────────────────────
-  const postToBackend = async (payload, forceTokenRefresh = false) => {
-    try {
-      if (user) payload.idToken = await user.getIdToken(forceTokenRefresh)
-      const res = await fetch('/api/community-messages', {
+  // `isMedia` enables a single retry with a force-refreshed token when the
+  // server returns 401 (e.g. slightly-stale cached Firebase token).
+  const postToBackend = async (payload, isMedia = false) => {
+    const doFetch = async (idToken) => {
+      const body = { displayName: getDisplayName(), userEmail: user?.email || '', ...payload }
+      if (idToken) body.idToken = idToken
+      return fetch('/api/community-messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: getDisplayName(), userEmail: user?.email || '', ...payload }),
+        body: JSON.stringify(body),
       })
+    }
+    try {
+      const token = user ? await user.getIdToken() : null
+      const res = await doFetch(token)
+      // On 401 for media, force-refresh the token and retry once
+      if (res.status === 401 && isMedia && user) {
+        const freshToken = await user.getIdToken(true)
+        const retry = await doFetch(freshToken)
+        return await retry.json()
+      }
       return await res.json()
     } catch {
       return { success: false }
@@ -221,15 +248,13 @@ export default function Community() {
   }
 
   // ── Voice recording ───────────────────────────────────────────────────────
-  const MAX_RECORDING_SECONDS = 60
-
   const startRecording = async () => {
     if (isRecording) return
     if (!user) { showToast('Sign in to send voice notes', 'error'); return }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       // Use low bitrate to keep payload small; fall back gracefully if unsupported
-      const recorderOptions = { audioBitsPerSecond: 32000 }
+      const recorderOptions = { audioBitsPerSecond: TARGET_AUDIO_BITRATE }
       if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
         recorderOptions.mimeType = 'audio/webm;codecs=opus'
       }
@@ -245,14 +270,7 @@ export default function Community() {
         setRecordingSeconds(s => {
           const next = s + 1
           if (next >= MAX_RECORDING_SECONDS) {
-            // Auto-stop when the limit is reached
-            clearInterval(recordingTimerRef.current)
-            if (mediaRecorderRef.current?.state !== 'inactive') {
-              mediaRecorderRef.current.stop()
-              mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
-            }
-            setIsRecording(false)
-            setRecordingSeconds(0)
+            cleanupRecording()
           }
           return next
         })
@@ -264,11 +282,7 @@ export default function Community() {
 
   const stopRecording = () => {
     if (!isRecording || !mediaRecorderRef.current) return
-    mediaRecorderRef.current.stop()
-    mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
-    clearInterval(recordingTimerRef.current)
-    setIsRecording(false)
-    setRecordingSeconds(0)
+    cleanupRecording()
   }
 
   const cancelRecording = () => {

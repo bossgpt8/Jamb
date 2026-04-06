@@ -1275,13 +1275,23 @@ app.post('/api/upsert-user', async (req, res) => {
     const uid = await verifyFirebaseToken(idToken);
     const tokenEmail = getTokenEmail(idToken);
     const isAdmin = await checkIsAdmin(uid, tokenEmail, email || null);
-    // Never downgrade an existing admin: only explicitly set role when promoting to admin.
-    // For new documents, $setOnInsert provides the default 'user' role.
-    const updateFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString() };
-    if (isAdmin) updateFields.role = 'admin';
+    // Never downgrade an existing admin via this login-time endpoint.
+    // Role demotion must go through the dedicated admin panel route (PATCH /api/admin/users/:uid/role).
+    // - isAdmin=true  → always set role:'admin' (new and existing docs)
+    // - isAdmin=false → only set role:'user' on brand-new documents ($setOnInsert);
+    //                   existing non-admin users retain their current role unchanged
+    const profileFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString() };
+    const update = { $set: profileFields };
+    if (isAdmin) {
+      // Promote to admin on both insert and update
+      update.$set.role = 'admin';
+    } else {
+      // Only set 'user' role when creating a new document; never overwrite an existing role
+      update.$setOnInsert = { role: 'user' };
+    }
     await User.findOneAndUpdate(
       { uid },
-      { $set: updateFields, $setOnInsert: { role: 'user' } },
+      update,
       { upsert: true, new: true }
     );
     res.json({ success: true });
@@ -1561,11 +1571,7 @@ app.post('/api/community-messages', async (req, res) => {
     try {
       userId = await verifyFirebaseToken(idToken);
     } catch {
-      // Full verification failed – try to use the decoded uid as a fallback.
-      const decoded = decodeFirebaseToken(idToken);
-      if (decoded?.sub) {
-        userId = decoded.sub;
-      } else if (type !== 'text') {
+      if (type !== 'text') {
         return res.status(401).json({ success: false, error: 'Auth required for media messages' });
       }
     }
