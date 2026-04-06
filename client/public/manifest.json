@@ -1,0 +1,23 @@
+{
+  "name": "JambGenius",
+  "short_name": "JambGenius",
+  "description": "Nigeria's leading JAMB exam preparation platform with full mock exams, practice questions, performance analytics, and study materials.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f9fafb",
+  "theme_color": "#2563eb",
+  "categories": ["education"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
