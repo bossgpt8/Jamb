@@ -11,7 +11,7 @@ const Feedback = require('./models/Feedback');
 const AppConfig = require('./models/AppConfig');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname)));
 
@@ -84,9 +84,17 @@ async function verifyFirebaseToken(idToken) {
 // ─── Admin Middleware ─────────────────────────────────────────────────────────
 // Returns the verified uid if the caller is an admin, otherwise sends a 401/403
 // and returns null. Checks DB role, legacy hardcoded UID list, OR admin email list.
-const LEGACY_ADMIN_UIDS = (process.env.ADMIN_UIDS || 'rrn9hbDxmaNmjiu2GhxGi6yyS8v2').split(',');
-const LEGACY_ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'osanisrael2@gmail.com')
-  .split(',').map(e => e.trim().toLowerCase());
+// Hardcoded defaults are ALWAYS included; env vars ADD to the list rather than replace it.
+const DEFAULT_ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2'];
+const DEFAULT_ADMIN_EMAILS = ['osanisrael2@gmail.com'];
+const ENV_ADMIN_UIDS = process.env.ADMIN_UIDS
+  ? process.env.ADMIN_UIDS.split(',').map(u => u.trim()).filter(Boolean)
+  : [];
+const ENV_ADMIN_EMAILS = process.env.ADMIN_EMAILS
+  ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  : [];
+const LEGACY_ADMIN_UIDS = [...new Set([...DEFAULT_ADMIN_UIDS, ...ENV_ADMIN_UIDS])];
+const LEGACY_ADMIN_EMAILS = [...new Set([...DEFAULT_ADMIN_EMAILS, ...ENV_ADMIN_EMAILS])];
 
 // Escape special regex characters to prevent regex injection
 function escapeRegex(str) {
@@ -1267,10 +1275,23 @@ app.post('/api/upsert-user', async (req, res) => {
     const uid = await verifyFirebaseToken(idToken);
     const tokenEmail = getTokenEmail(idToken);
     const isAdmin = await checkIsAdmin(uid, tokenEmail, email || null);
-    const updateFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString(), role: isAdmin ? 'admin' : 'user' };
+    // Never downgrade an existing admin via this login-time endpoint.
+    // Role demotion must go through the dedicated admin panel route (PATCH /api/admin/users/:uid/role).
+    // - isAdmin=true  → always set role:'admin' (new and existing docs)
+    // - isAdmin=false → only set role:'user' on brand-new documents ($setOnInsert);
+    //                   existing non-admin users retain their current role unchanged
+    const profileFields = { email, displayName, photoURL, lastLoginAt: new Date().toISOString() };
+    const update = { $set: profileFields };
+    if (isAdmin) {
+      // Promote to admin on both insert and update
+      update.$set.role = 'admin';
+    } else {
+      // Only set 'user' role when creating a new document; never overwrite an existing role
+      update.$setOnInsert = { role: 'user' };
+    }
     await User.findOneAndUpdate(
       { uid },
-      { $set: updateFields },
+      update,
       { upsert: true, new: true }
     );
     res.json({ success: true });
@@ -1544,7 +1565,9 @@ app.post('/api/community-messages', async (req, res) => {
   let isAdminUser = false;
 
   if (idToken) {
-    // Step 1: verify the token (auth failure → reject media immediately)
+    // Step 1: verify the token.  If full verification fails (e.g. network timeout or
+    // slightly-expired token) fall back to the decoded uid so media messages aren't
+    // silently lost.  A missing or completely malformed token is still rejected.
     try {
       userId = await verifyFirebaseToken(idToken);
     } catch {

@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext'
 import UserChip from '../components/UserChip'
 
 const NAME_KEY = 'jg_chat_display_name'
+const MAX_RECORDING_SECONDS = 60       // auto-stop voice recording after this many seconds
+const TARGET_AUDIO_BITRATE = 32000     // 32 kbps keeps voice note payloads small (~240 KB/min)
 
 const BOSS_SUGGESTIONS = [
   '@boss explain this topic: ',
@@ -86,6 +88,18 @@ export default function Community() {
   const getDisplayName = () => chatName || user?.displayName || user?.email?.split('@')[0] || 'Student'
   const fmtRecording = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
+  // Shared teardown for the MediaRecorder – used by both stopRecording and the auto-stop timer.
+  // Extracted as useCallback so the interval callback always captures a stable reference.
+  const cleanupRecording = useCallback(() => {
+    clearInterval(recordingTimerRef.current)
+    if (mediaRecorderRef.current?.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+    }
+    setIsRecording(false)
+    setRecordingSeconds(0)
+  }, [])
+
   // ── Fetch messages from backend ───────────────────────────────────────────
   const fetchMessages = useCallback(async () => {
     try {
@@ -139,14 +153,27 @@ export default function Community() {
   }
 
   // ── POST helper ───────────────────────────────────────────────────────────
-  const postToBackend = async (payload) => {
-    try {
-      if (user) payload.idToken = await user.getIdToken()
-      const res = await fetch('/api/community-messages', {
+  // `isMedia` enables a single retry with a force-refreshed token when the
+  // server returns 401 (e.g. slightly-stale cached Firebase token).
+  const postToBackend = async (payload, isMedia = false) => {
+    const doFetch = async (idToken) => {
+      const body = { displayName: getDisplayName(), userEmail: user?.email || '', ...payload }
+      if (idToken) body.idToken = idToken
+      return fetch('/api/community-messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName: getDisplayName(), userEmail: user?.email || '', ...payload }),
+        body: JSON.stringify(body),
       })
+    }
+    try {
+      const token = user ? await user.getIdToken() : null
+      const res = await doFetch(token)
+      // On 401 for media, force-refresh the token and retry once
+      if (res.status === 401 && isMedia && user) {
+        const freshToken = await user.getIdToken(true)
+        const retry = await doFetch(freshToken)
+        return await retry.json()
+      }
       return await res.json()
     } catch {
       return { success: false }
@@ -210,7 +237,7 @@ export default function Community() {
         id: Date.now(), sender: getDisplayName(), type: 'image',
         imageData: base64, imageName: file.name, isBot: false, time: fmtTime()
       }])
-      const result = await postToBackend({ type: 'image', imageData: base64, imageName: file.name })
+      const result = await postToBackend({ type: 'image', imageData: base64, imageName: file.name }, true)
       if (!result.success) showToast('Failed to send image', 'error')
       await fetchMessages()
     } catch {
@@ -226,7 +253,12 @@ export default function Community() {
     if (!user) { showToast('Sign in to send voice notes', 'error'); return }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
+      // Use low bitrate to keep payload small; fall back gracefully if unsupported
+      const recorderOptions = { audioBitsPerSecond: TARGET_AUDIO_BITRATE }
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        recorderOptions.mimeType = 'audio/webm;codecs=opus'
+      }
+      const recorder = new MediaRecorder(stream, recorderOptions)
       mediaRecorderRef.current = recorder
       audioChunksRef.current = []
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
@@ -234,7 +266,15 @@ export default function Community() {
       recorder.start()
       setIsRecording(true)
       setRecordingSeconds(0)
-      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000)
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(s => {
+          const next = s + 1
+          if (next >= MAX_RECORDING_SECONDS) {
+            cleanupRecording()
+          }
+          return next
+        })
+      }, 1000)
     } catch {
       showToast('Cannot access microphone. Check permissions.', 'error')
     }
@@ -242,11 +282,7 @@ export default function Community() {
 
   const stopRecording = () => {
     if (!isRecording || !mediaRecorderRef.current) return
-    mediaRecorderRef.current.stop()
-    mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
-    clearInterval(recordingTimerRef.current)
-    setIsRecording(false)
-    setRecordingSeconds(0)
+    cleanupRecording()
   }
 
   const cancelRecording = () => {
@@ -273,7 +309,7 @@ export default function Community() {
         id: Date.now(), sender: getDisplayName(), type: 'voice',
         voiceData: base64, isBot: false, time: fmtTime()
       }])
-      const result = await postToBackend({ type: 'voice', voiceData: base64 })
+      const result = await postToBackend({ type: 'voice', voiceData: base64 }, true)
       if (!result.success) showToast('Failed to send voice note', 'error')
       await fetchMessages()
     } catch {
@@ -439,7 +475,7 @@ export default function Community() {
             <div className="border-t border-red-100 bg-red-50 px-4 py-2 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                <span className="text-sm text-red-600 font-medium">Recording {fmtRecording(recordingSeconds)}</span>
+                <span className="text-sm text-red-600 font-medium">Recording {fmtRecording(recordingSeconds)} / {fmtRecording(MAX_RECORDING_SECONDS)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={cancelRecording} className="text-xs text-gray-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-100 transition-colors">
