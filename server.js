@@ -83,12 +83,20 @@ async function verifyFirebaseToken(idToken) {
 
 // ─── Admin Middleware ─────────────────────────────────────────────────────────
 // Returns the verified uid if the caller is an admin, otherwise sends a 401/403
-// and returns null. Checks DB role OR legacy hardcoded UID list.
+// and returns null. Checks DB role, legacy hardcoded UID list, OR admin email list.
 const LEGACY_ADMIN_UIDS = (process.env.ADMIN_UIDS || 'rrn9hbDxmaNmjiu2GhxGi6yyS8v2').split(',');
+const LEGACY_ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'osanisrael2@gmail.com')
+  .split(',').map(e => e.trim().toLowerCase());
 
 // Escape special regex characters to prevent regex injection
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Extract the email claim from a Firebase JWT without full verification
+function getTokenEmail(idToken) {
+  const payload = decodeFirebaseToken(idToken);
+  return payload?.email ? payload.email.toLowerCase() : null;
 }
 
 async function requireAdmin(req, res) {
@@ -103,9 +111,13 @@ async function requireAdmin(req, res) {
   }
   // Allow legacy hardcoded UIDs for backward compatibility
   if (LEGACY_ADMIN_UIDS.includes(uid)) return uid;
+  // Allow admin emails from the JWT claim
+  const tokenEmail = getTokenEmail(idToken);
+  if (tokenEmail && LEGACY_ADMIN_EMAILS.includes(tokenEmail)) return uid;
   try {
-    const user = await User.findOne({ uid }, 'role');
+    const user = await User.findOne({ uid }, 'role email');
     if (user && user.role === 'admin') return uid;
+    if (user?.email && LEGACY_ADMIN_EMAILS.includes(user.email.toLowerCase())) return uid;
   } catch (err) {
     console.error('requireAdmin DB error:', err.message);
   }
@@ -1265,15 +1277,22 @@ app.post('/api/get-user-profile', async (req, res) => {
   if (!idToken) return res.status(401).json({ success: false, error: 'Auth required' });
   try {
     const uid = await verifyFirebaseToken(idToken);
+    const tokenEmail = getTokenEmail(idToken);
+    const isLegacyAdmin = LEGACY_ADMIN_UIDS.includes(uid) ||
+      (tokenEmail && LEGACY_ADMIN_EMAILS.includes(tokenEmail));
     const user = await User.findOne({ uid });
-    // Ensure legacy admin UIDs always surface as role:'admin' even if the DB
+    // Ensure legacy admin UIDs/emails always surface as role:'admin' even if the DB
     // record still has the default role:'user' value.
-    if (user && LEGACY_ADMIN_UIDS.includes(uid) && user.role !== 'admin') {
+    if (user && isLegacyAdmin && user.role !== 'admin') {
+      user.role = 'admin';
+    }
+    // Also check admin by stored email in the DB document
+    if (user && user.email && LEGACY_ADMIN_EMAILS.includes(user.email.toLowerCase()) && user.role !== 'admin') {
       user.role = 'admin';
     }
     const profile = user ? user.toObject() : null;
     // Also mark legacy admins who don't yet have a DB document
-    if (!profile && LEGACY_ADMIN_UIDS.includes(uid)) {
+    if (!profile && isLegacyAdmin) {
       res.json({ success: true, profile: { role: 'admin' } });
       return;
     }
@@ -1516,18 +1535,28 @@ app.post('/api/community-messages', async (req, res) => {
   let isAdminUser = false;
 
   if (idToken) {
+    // Step 1: verify the token (auth failure → reject media immediately)
     try {
       userId = await verifyFirebaseToken(idToken);
-      // Check DB role or legacy UID list for admin flag
-      if (LEGACY_ADMIN_UIDS.includes(userId)) {
-        isAdminUser = true;
-      } else {
-        const userDoc = await User.findOne({ uid: userId }, 'role').lean();
-        isAdminUser = userDoc?.role === 'admin';
-      }
     } catch {
       if (type !== 'text') {
         return res.status(401).json({ success: false, error: 'Auth required for media messages' });
+      }
+    }
+
+    // Step 2: determine admin status (DB errors must not block the message)
+    if (userId !== 'anonymous') {
+      try {
+        const tokenEmail = getTokenEmail(idToken);
+        if (LEGACY_ADMIN_UIDS.includes(userId) || (tokenEmail && LEGACY_ADMIN_EMAILS.includes(tokenEmail))) {
+          isAdminUser = true;
+        } else {
+          const userDoc = await User.findOne({ uid: userId }, 'role email').lean();
+          isAdminUser = userDoc?.role === 'admin' ||
+            (!!userDoc?.email && LEGACY_ADMIN_EMAILS.includes(userDoc.email.toLowerCase()));
+        }
+      } catch {
+        // Admin check failed — proceed as a regular (non-admin) authenticated user
       }
     }
   } else if (type !== 'text') {
