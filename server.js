@@ -1266,7 +1266,18 @@ app.post('/api/get-user-profile', async (req, res) => {
   try {
     const uid = await verifyFirebaseToken(idToken);
     const user = await User.findOne({ uid });
-    res.json({ success: true, profile: user || null });
+    // Ensure legacy admin UIDs always surface as role:'admin' even if the DB
+    // record still has the default role:'user' value.
+    if (user && LEGACY_ADMIN_UIDS.includes(uid) && user.role !== 'admin') {
+      user.role = 'admin';
+    }
+    const profile = user ? user.toObject() : null;
+    // Also mark legacy admins who don't yet have a DB document
+    if (!profile && LEGACY_ADMIN_UIDS.includes(uid)) {
+      res.json({ success: true, profile: { role: 'admin' } });
+      return;
+    }
+    res.json({ success: true, profile });
   } catch (err) {
     console.error('Get profile error:', err);
     res.status(500).json({ success: false, error: err.message });

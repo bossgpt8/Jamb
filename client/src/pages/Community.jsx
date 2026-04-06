@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext'
 import UserChip from '../components/UserChip'
 
 const NAME_KEY = 'jg_chat_display_name'
-const ADMIN_UIDS = ['rrn9hbDxmaNmjiu2GhxGi6yyS8v2']
 
 const BOSS_SUGGESTIONS = [
   '@boss explain this topic: ',
@@ -65,7 +64,7 @@ const mapDbMessage = (m) => ({
 
 export default function Community() {
   const navigate = useNavigate()
-  const { user, showToast } = useAuth()
+  const { user, showToast, isAdmin } = useAuth()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -83,7 +82,6 @@ export default function Community() {
   const audioChunksRef = useRef([])
   const recordingTimerRef = useRef(null)
 
-  const isAdmin = user && ADMIN_UIDS.includes(user.uid)
   const fmtTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const getDisplayName = () => chatName || user?.displayName || user?.email?.split('@')[0] || 'Student'
   const fmtRecording = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
