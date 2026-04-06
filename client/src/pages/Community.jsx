@@ -139,9 +139,9 @@ export default function Community() {
   }
 
   // ── POST helper ───────────────────────────────────────────────────────────
-  const postToBackend = async (payload) => {
+  const postToBackend = async (payload, forceTokenRefresh = false) => {
     try {
-      if (user) payload.idToken = await user.getIdToken()
+      if (user) payload.idToken = await user.getIdToken(forceTokenRefresh)
       const res = await fetch('/api/community-messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,7 +210,7 @@ export default function Community() {
         id: Date.now(), sender: getDisplayName(), type: 'image',
         imageData: base64, imageName: file.name, isBot: false, time: fmtTime()
       }])
-      const result = await postToBackend({ type: 'image', imageData: base64, imageName: file.name })
+      const result = await postToBackend({ type: 'image', imageData: base64, imageName: file.name }, true)
       if (!result.success) showToast('Failed to send image', 'error')
       await fetchMessages()
     } catch {
@@ -221,12 +221,19 @@ export default function Community() {
   }
 
   // ── Voice recording ───────────────────────────────────────────────────────
+  const MAX_RECORDING_SECONDS = 60
+
   const startRecording = async () => {
     if (isRecording) return
     if (!user) { showToast('Sign in to send voice notes', 'error'); return }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
+      // Use low bitrate to keep payload small; fall back gracefully if unsupported
+      const recorderOptions = { audioBitsPerSecond: 32000 }
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        recorderOptions.mimeType = 'audio/webm;codecs=opus'
+      }
+      const recorder = new MediaRecorder(stream, recorderOptions)
       mediaRecorderRef.current = recorder
       audioChunksRef.current = []
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data) }
@@ -234,7 +241,22 @@ export default function Community() {
       recorder.start()
       setIsRecording(true)
       setRecordingSeconds(0)
-      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000)
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(s => {
+          const next = s + 1
+          if (next >= MAX_RECORDING_SECONDS) {
+            // Auto-stop when the limit is reached
+            clearInterval(recordingTimerRef.current)
+            if (mediaRecorderRef.current?.state !== 'inactive') {
+              mediaRecorderRef.current.stop()
+              mediaRecorderRef.current.stream?.getTracks().forEach(t => t.stop())
+            }
+            setIsRecording(false)
+            setRecordingSeconds(0)
+          }
+          return next
+        })
+      }, 1000)
     } catch {
       showToast('Cannot access microphone. Check permissions.', 'error')
     }
@@ -273,7 +295,7 @@ export default function Community() {
         id: Date.now(), sender: getDisplayName(), type: 'voice',
         voiceData: base64, isBot: false, time: fmtTime()
       }])
-      const result = await postToBackend({ type: 'voice', voiceData: base64 })
+      const result = await postToBackend({ type: 'voice', voiceData: base64 }, true)
       if (!result.success) showToast('Failed to send voice note', 'error')
       await fetchMessages()
     } catch {
@@ -439,7 +461,7 @@ export default function Community() {
             <div className="border-t border-red-100 bg-red-50 px-4 py-2 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                <span className="text-sm text-red-600 font-medium">Recording {fmtRecording(recordingSeconds)}</span>
+                <span className="text-sm text-red-600 font-medium">Recording {fmtRecording(recordingSeconds)} / {fmtRecording(MAX_RECORDING_SECONDS)}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={cancelRecording} className="text-xs text-gray-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-100 transition-colors">
