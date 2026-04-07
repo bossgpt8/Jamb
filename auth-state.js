@@ -227,6 +227,12 @@ async function loadUserProfile(user) {
         };
         
         sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionData));
+
+        // Flush any Expo push token that was held back while the user was
+        // unauthenticated (token registration requires a valid userId).
+        if (window.notificationManager) {
+            window.notificationManager.notifyUserSignedIn();
+        }
         
         // Save to Android app for offline access
         saveToAndroidApp({

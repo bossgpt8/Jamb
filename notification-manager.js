@@ -258,6 +258,13 @@ class NotificationManager {
     return false;
   }
 
+  // Called by auth-state.js after the user signs in and sessionStorage is
+  // populated with the userId.  Re-flushes any pending push token that
+  // could not be registered while the user was unauthenticated.
+  notifyUserSignedIn() {
+    this._flushPendingToken();
+  }
+
   // Update preferences
   setPreferences(newPrefs) {
     this.preferences = { ...this.preferences, ...newPrefs };
