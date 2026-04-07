@@ -43,44 +43,32 @@ class NotificationManager {
   // Setup notifications for the app
   async setupAppNotifications() {
     console.log('🚀 Setting up app notifications');
-    
-    try {
-      // Get FCM token from server (in production)
-      this.registerWithServer();
-    } catch (error) {
-      console.error('Error setting up app notifications:', error);
-    }
+    // Token registration happens via the WebView bridge: the mobile app
+    // injects window.__expoPushToken which triggers registerExpoPushToken().
+    // No fake token is sent here.
   }
 
-  // Register device with server
-  async registerWithServer() {
-    try {
-      const userId = this.getCurrentUserId();
-      if (!userId) return;
-
-      const response = await fetch('/api/notification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'register-token',
-          userId: userId,
-          fcmToken: 'app-token-' + userId + '-' + Date.now()
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        console.log('✅ Device registered for notifications');
-      }
-    } catch (error) {
-      console.error('Error registering with server:', error);
-    }
-  }
-
-  // Register Expo push token received from the mobile app
+  // Register Expo push token received from the mobile app.
+  // If the user is not yet signed in the token is held in pendingToken and
+  // retried every second for up to 30 seconds so it is never lost.
   async registerExpoPushToken(token) {
+    this.pendingToken = token;
+    this._tokenRetryCount = 0;
+    await this._flushPendingToken();
+  }
+
+  async _flushPendingToken() {
+    if (!this.pendingToken) return;
     const userId = this.getCurrentUserId();
-    if (!userId) return;
+    if (!userId) {
+      if (this._tokenRetryCount < 30) {
+        this._tokenRetryCount++;
+        setTimeout(() => this._flushPendingToken(), 1000);
+      }
+      return;
+    }
+    const token = this.pendingToken;
+    this.pendingToken = null;
     try {
       const response = await fetch('/api/notification', {
         method: 'POST',
@@ -269,9 +257,9 @@ class NotificationManager {
   // Get current user ID
   getCurrentUserId() {
     try {
-      // Get from auth state
-      const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-      return user.uid || null;
+      // auth-state.js persists auth under 'jambgenius_auth_state'
+      const state = JSON.parse(sessionStorage.getItem('jambgenius_auth_state') || '{}');
+      return state.uid || null;
     } catch (error) {
       return null;
     }
