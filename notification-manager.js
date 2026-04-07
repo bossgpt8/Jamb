@@ -1,4 +1,7 @@
 // Notification Manager - Manage push notifications for the app
+const MAX_TOKEN_RETRY_ATTEMPTS = 30;
+const TOKEN_RETRY_INTERVAL_MS = 1000;
+
 class NotificationManager {
   constructor() {
     this.fcmToken = null;
@@ -8,6 +11,9 @@ class NotificationManager {
       exams: true,
       streaks: true
     };
+    this.pendingToken = null;
+    this._tokenRetryCount = 0;
+    this._tokenRetryTimer = null;
     this.init();
   }
 
@@ -61,11 +67,16 @@ class NotificationManager {
     if (!this.pendingToken) return;
     const userId = this.getCurrentUserId();
     if (!userId) {
-      if (this._tokenRetryCount < 30) {
+      if (this._tokenRetryCount < MAX_TOKEN_RETRY_ATTEMPTS) {
         this._tokenRetryCount++;
-        setTimeout(() => this._flushPendingToken(), 1000);
+        this._tokenRetryTimer = setTimeout(() => this._flushPendingToken(), TOKEN_RETRY_INTERVAL_MS);
       }
       return;
+    }
+    // User is now signed in — clear any pending retry timer
+    if (this._tokenRetryTimer !== null) {
+      clearTimeout(this._tokenRetryTimer);
+      this._tokenRetryTimer = null;
     }
     const token = this.pendingToken;
     this.pendingToken = null;
