@@ -1,5 +1,7 @@
 // Notification API - Expo push notifications via MongoDB token store
 const mongoose = require('mongoose');
+const { verifyFirebaseToken, getTokenEmail } = require('../lib/auth');
+const { checkIsAdmin } = require('../lib/admin');
 
 let isConnected = false;
 
@@ -89,6 +91,24 @@ module.exports = async function handler(req, res) {
 
       console.log(`✅ Expo push token registered for user ${safeUserId}`);
       return res.status(200).json({ success: true, message: 'Token registered' });
+    }
+
+    // ── admin-only actions ────────────────────────────────────────────────────
+    if (action === 'send' || action === 'broadcast') {
+      const idToken = req.body?.idToken || req.headers?.['x-id-token'];
+      if (!idToken) {
+        return res.status(401).json({ error: 'Auth required' });
+      }
+      let uid;
+      try {
+        uid = await verifyFirebaseToken(idToken);
+      } catch {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const tokenEmail = getTokenEmail(idToken);
+      if (!(await checkIsAdmin(uid, tokenEmail, null))) {
+        return res.status(403).json({ error: 'Forbidden: Admin only' });
+      }
     }
 
     // ── send ──────────────────────────────────────────────────────────────────
