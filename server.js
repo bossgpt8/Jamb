@@ -1136,6 +1136,8 @@ app.post('/api/notification', async (req, res) => {
     }
 
     if (action === 'send') {
+      const adminUid = await requireAdmin(req, res);
+      if (!adminUid) return;
       const { userId, title, body, data } = req.body;
       if (!userId || !title || !body) {
         return res.status(400).json({ error: 'userId, title and body are required' });
@@ -1149,6 +1151,8 @@ app.post('/api/notification', async (req, res) => {
     }
 
     if (action === 'broadcast') {
+      const adminUid = await requireAdmin(req, res);
+      if (!adminUid) return;
       const { title, body, data } = req.body;
       if (!title || !body) return res.status(400).json({ error: 'title and body are required' });
       const records = await PushToken.find({}, 'expoPushToken');
