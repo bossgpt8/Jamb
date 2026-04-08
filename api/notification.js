@@ -1,4 +1,4 @@
-// Notification API - Expo push notifications via MongoDB token store
+// Notification API - OneSignal push notifications via MongoDB player-id store
 const mongoose = require('mongoose');
 const { verifyFirebaseToken, getTokenEmail } = require('../lib/auth');
 const { checkIsAdmin } = require('../lib/admin');
@@ -15,36 +15,38 @@ async function connectDB() {
 
 const pushTokenSchema = new mongoose.Schema({
   userId: { type: String, required: true, unique: true },
-  expoPushToken: { type: String, required: true },
+  oneSignalPlayerId: { type: String, required: true },
   updatedAt: { type: Date, default: Date.now }
 });
 
 const PushToken = mongoose.models.PushToken || mongoose.model('PushToken', pushTokenSchema);
 
-async function sendExpoPush(tokens, title, body, data = {}) {
-  const messages = tokens.map((token) => ({
-    to: token,
-    title,
-    body,
-    data,
-    sound: 'default'
-  }));
+async function sendOneSignalPush(playerIds, title, body, data = {}) {
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+  if (!appId || !apiKey) throw new Error('ONESIGNAL_APP_ID and ONESIGNAL_REST_API_KEY must be set');
 
   const results = [];
-  // Send in batches of 100
-  for (let i = 0; i < messages.length; i += 100) {
-    const batch = messages.slice(i, i + 100);
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+  // Send in batches of 2000 (OneSignal limit per request)
+  for (let i = 0; i < playerIds.length; i += 2000) {
+    const batch = playerIds.slice(i, i + 2000);
+    const response = await fetch('https://onesignal.com/api/v1/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Accept: 'application/json'
+        Authorization: `Basic ${apiKey}`
       },
-      body: JSON.stringify(batch)
+      body: JSON.stringify({
+        app_id: appId,
+        include_player_ids: batch,
+        headings: { en: title },
+        contents: { en: body },
+        data
+      })
     });
     if (!response.ok) {
       const errBody = await response.text();
-      throw new Error(`Expo push API error ${response.status}: ${errBody}`);
+      throw new Error(`OneSignal API error ${response.status}: ${errBody}`);
     }
     const result = await response.json();
     results.push(result);
@@ -77,20 +79,20 @@ module.exports = async function handler(req, res) {
 
     // ── register-token ────────────────────────────────────────────────────────
     if (action === 'register-token') {
-      const { userId, expoPushToken } = req.body;
-      if (!userId || !expoPushToken) {
-        return res.status(400).json({ error: 'userId and expoPushToken are required' });
+      const { userId, oneSignalPlayerId } = req.body;
+      if (!userId || !oneSignalPlayerId) {
+        return res.status(400).json({ error: 'userId and oneSignalPlayerId are required' });
       }
       const safeUserId = String(userId).trim();
 
       await PushToken.findOneAndUpdate(
         { userId: safeUserId },
-        { expoPushToken: String(expoPushToken), updatedAt: new Date() },
+        { oneSignalPlayerId: String(oneSignalPlayerId), updatedAt: new Date() },
         { upsert: true, new: true }
       );
 
-      console.log(`✅ Expo push token registered for user ${safeUserId}`);
-      return res.status(200).json({ success: true, message: 'Token registered' });
+      console.log(`✅ OneSignal player ID registered for user ${safeUserId}`);
+      return res.status(200).json({ success: true, message: 'Player ID registered' });
     }
 
     // ── admin-only actions ────────────────────────────────────────────────────
@@ -125,7 +127,7 @@ module.exports = async function handler(req, res) {
       }
 
       const notifData = { ...(data || {}), ...(deepLink && { url: deepLink }), ...(type && { type }) };
-      const results = await sendExpoPush([record.expoPushToken], title, body, notifData);
+      const results = await sendOneSignalPush([record.oneSignalPlayerId], title, body, notifData);
       console.log(`✅ Push notification sent to user ${safeUserId}`);
       return res.status(200).json({ success: true, results });
     }
@@ -137,14 +139,14 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: 'title and body are required' });
       }
 
-      const records = await PushToken.find({}, 'expoPushToken');
-      const tokens = records.map((r) => r.expoPushToken);
+      const records = await PushToken.find({}, 'oneSignalPlayerId');
+      const tokens = records.map((r) => r.oneSignalPlayerId);
 
       if (tokens.length === 0) {
         return res.status(200).json({ success: true, message: 'No tokens registered', sent: 0 });
       }
 
-      const results = await sendExpoPush(tokens, title, body, data || {});
+      const results = await sendOneSignalPush(tokens, title, body, data || {});
       console.log(`✅ Broadcast sent to ${tokens.length} devices`);
       return res.status(200).json({ success: true, sent: tokens.length, results });
     }
