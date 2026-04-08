@@ -26,13 +26,13 @@ class NotificationManager {
       this.preferences = JSON.parse(savedPrefs);
     }
 
-    // Capture Expo push token injected by the mobile app
-    const saveToken = (token) => {
-      if (!token) return;
-      this.registerExpoPushToken(token);
+    // Capture OneSignal player ID injected by the mobile app
+    const savePlayerId = (playerId) => {
+      if (!playerId) return;
+      this.registerOneSignalPlayerId(playerId);
     };
-    if (window.__expoPushToken) saveToken(window.__expoPushToken);
-    window.addEventListener('expoPushToken', (e) => saveToken(e.detail));
+    if (window.__oneSignalPlayerId) savePlayerId(window.__oneSignalPlayerId);
+    window.addEventListener('oneSignalPlayerId', (e) => savePlayerId(e.detail));
 
     // Check if running on mobile app
     if (this.isApp()) {
@@ -50,15 +50,15 @@ class NotificationManager {
   async setupAppNotifications() {
     console.log('🚀 Setting up app notifications');
     // Token registration happens via the WebView bridge: the mobile app
-    // injects window.__expoPushToken which triggers registerExpoPushToken().
+    // injects window.__oneSignalPlayerId which triggers registerOneSignalPlayerId().
     // No fake token is sent here.
   }
 
-  // Register Expo push token received from the mobile app.
-  // If the user is not yet signed in the token is held in pendingToken and
+  // Register OneSignal player ID received from the mobile app.
+  // If the user is not yet signed in the player ID is held in pendingToken and
   // retried every second for up to 30 seconds so it is never lost.
-  async registerExpoPushToken(token) {
-    this.pendingToken = token;
+  async registerOneSignalPlayerId(playerId) {
+    this.pendingToken = playerId;
     this._tokenRetryCount = 0;
     await this._flushPendingToken();
   }
@@ -84,13 +84,13 @@ class NotificationManager {
       const response = await fetch('/api/notification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'register-token', userId, expoPushToken: token })
+        body: JSON.stringify({ action: 'register-token', userId, oneSignalPlayerId: token })
       });
       if (!response.ok) {
-        console.error('Failed to register Expo push token:', response.status);
+        console.error('Failed to register OneSignal player ID:', response.status);
       }
     } catch (error) {
-      console.error('Error registering Expo push token:', error);
+      console.error('Error registering OneSignal player ID:', error);
     }
   }
 
