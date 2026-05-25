@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { auth } from '../firebase'
 import { onAuthStateChanged } from 'firebase/auth'
 import MathText from '../components/MathText'
+import QuestionPrompt from '../components/QuestionPrompt'
+import { sortEnglishQuestionsForDisplay } from '../utils/englishQuestion'
 
 const EXAM_DURATION = 2 * 60 * 60 // 2 hours in seconds
 
@@ -217,7 +219,8 @@ export default function ExamRoom() {
   }
 
   const fillQuestionSet = (questionsList, limit, subject) => {
-    const source = questionsList.length > 0 ? questionsList : getSampleQuestions(subject, limit)
+    const sourceBase = questionsList.length > 0 ? questionsList : getSampleQuestions(subject, limit)
+    const source = sortEnglishQuestionsForDisplay(sourceBase, subject)
     const result = []
     while (result.length < limit && source.length > 0) {
       for (const item of source) {
@@ -448,7 +451,7 @@ export default function ExamRoom() {
                                 <div className="flex items-start justify-between gap-4 mb-3">
                                   <div>
                                     <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Question {item.index + 1}</p>
-                                    <h4 className="text-lg font-semibold text-gray-900 leading-relaxed"><MathText text={item.question} inline /></h4>
+                                    <h4 className="text-lg font-semibold text-gray-900 leading-relaxed"><QuestionPrompt text={item.question} subject={item.subject} inline /></h4>
                                     {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> <MathText text={item.passage} inline /></p> : null}
                                   </div>
                                   <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${item.selectedIndex === undefined ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
@@ -495,7 +498,7 @@ export default function ExamRoom() {
                             <div className="flex items-start justify-between gap-4 mb-3">
                               <div>
                                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Question {item.index + 1}</p>
-                                <h4 className="text-lg font-semibold text-gray-900 leading-relaxed"><MathText text={item.question} inline /></h4>
+                                <h4 className="text-lg font-semibold text-gray-900 leading-relaxed"><QuestionPrompt text={item.question} subject={item.subject} inline /></h4>
                                 <p className="text-xs mt-1 text-gray-500 capitalize">Subject: {item.subject || 'General'}</p>
                                 {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> <MathText text={item.passage} inline /></p> : null}
                               </div>
@@ -611,7 +614,7 @@ export default function ExamRoom() {
                   </div>
                 ) : null}
                 <p className="text-gray-400 text-sm mb-3">Question {currentQ + 1} of {questions.length}</p>
-                <MathText text={q.question} className="text-white text-lg font-medium leading-relaxed" />
+                <QuestionPrompt text={q.question} subject={q.subject} className="text-white text-lg font-medium leading-relaxed" />
               </div>
               <div className="space-y-3">
                 {q.options.map((opt, i) => {

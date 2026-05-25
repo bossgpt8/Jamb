@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import MathText from '../components/MathText'
+import QuestionPrompt from '../components/QuestionPrompt'
+import { sortEnglishQuestionsForDisplay } from '../utils/englishQuestion'
 
 const QUESTIONS_PER_SESSION = 20
 
@@ -86,7 +88,8 @@ export default function PracticeExam() {
   }
 
   const fillQuestionSet = (questionsList, limit, subj) => {
-    const source = questionsList.length > 0 ? questionsList : getFallback(subj)
+    const sourceBase = questionsList.length > 0 ? questionsList : getFallback(subj)
+    const source = sortEnglishQuestionsForDisplay(sourceBase, subj)
     const filled = []
     while (filled.length < limit && source.length > 0) {
       for (const question of source) {
@@ -247,7 +250,7 @@ export default function PracticeExam() {
             </div>
           ) : null}
           <p className="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Question {currentQ + 1} of {questions.length}</p>
-          <MathText text={q.question} className="text-lg font-semibold text-gray-900 leading-relaxed" />
+          <QuestionPrompt text={q.question} subject={q.subject || subject} className="text-lg font-semibold text-gray-900 leading-relaxed" />
           {q.year && <p className="text-xs text-gray-400 mt-2">JAMB {q.year}</p>}
         </div>
 

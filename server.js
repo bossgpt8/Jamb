@@ -780,6 +780,10 @@ function transformQuestion(q) {
   };
 }
 
+function isEnglishSubject(value) {
+  return String(value || '').toLowerCase().trim() === 'english';
+}
+
 // GET /api/questions?subject=english&limit=20
 app.get('/api/questions', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -794,10 +798,13 @@ app.get('/api/questions', async (req, res) => {
     // Use regex for case-insensitive match in case DB has mixed case
     const subjectRegex = new RegExp(`^${subjectClean}$`, 'i');
     
-    const questions = await Question.aggregate([
-      { $match: { subject: { $regex: subjectRegex } } },
-      { $sample: { size: Math.min(parseInt(limit) || 20, 200) } }
-    ]);
+    const requestedLimit = Math.min(parseInt(limit) || 20, 200);
+    const questions = isEnglishSubject(subjectClean)
+      ? await Question.find({ subject: { $regex: subjectRegex } }).sort({ year: 1, _id: 1 }).limit(requestedLimit).lean()
+      : await Question.aggregate([
+          { $match: { subject: { $regex: subjectRegex } } },
+          { $sample: { size: requestedLimit } }
+        ]);
     
     console.log(`📚 Questions query: subject="${subjectClean}", found: ${questions.length}`);
 
@@ -822,12 +829,14 @@ app.get('/api/questions/exam', async (req, res) => {
     const allQuestions = [];
 
     for (const subject of subjectList) {
-      const count = subject === 'english' ? 60 : 40;
+      const count = isEnglishSubject(subject) ? 60 : 40;
       const subjectRegex = new RegExp(`^${subject}$`, 'i');
-      const qs = await Question.aggregate([
-        { $match: { subject: { $regex: subjectRegex } } },
-        { $sample: { size: count } }
-      ]);
+      const qs = isEnglishSubject(subject)
+        ? await Question.find({ subject: { $regex: subjectRegex } }).sort({ year: 1, _id: 1 }).limit(count).lean()
+        : await Question.aggregate([
+            { $match: { subject: { $regex: subjectRegex } } },
+            { $sample: { size: count } }
+          ]);
       console.log(`📝 Exam subject "${subject}": ${qs.length} questions`);
       allQuestions.push(...qs.map(transformQuestion));
     }
