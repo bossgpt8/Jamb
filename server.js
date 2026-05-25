@@ -790,7 +790,8 @@ function transformQuestion(q) {
 }
 
 function isEnglishSubject(value) {
-  return String(value || '').toLowerCase().trim() === 'english';
+  const normalized = String(value || '').toLowerCase().trim();
+  return normalized === 'english' || normalized === 'use of english';
 }
 
 // GET /api/questions?subject=english&limit=20
