@@ -4,12 +4,25 @@ import MathText from '../components/MathText'
 import QuestionPrompt from '../components/QuestionPrompt'
 import { sortEnglishQuestionsForDisplay } from '../utils/englishQuestion'
 
-const QUESTIONS_PER_SESSION = 20
+const DEFAULT_QUESTIONS_PER_SESSION = 20
+const MAX_QUESTIONS_PER_SESSION = 100
+
+function formatSubjectName(value) {
+  return String(value || '')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
 
 export default function PracticeExam() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const subject = searchParams.get('subject') || 'mathematics'
+  const parsedCount = parseInt(searchParams.get('count') || '', 10)
+  const questionsPerSession = Number.isFinite(parsedCount)
+    ? Math.min(Math.max(parsedCount, 1), MAX_QUESTIONS_PER_SESSION)
+    : DEFAULT_QUESTIONS_PER_SESSION
   const [questions, setQuestions] = useState([])
   const [currentQ, setCurrentQ] = useState(0)
   const [selected, setSelected] = useState({})
@@ -24,16 +37,16 @@ export default function PracticeExam() {
   useEffect(() => {
     document.title = `Practice ${subject} | JambGenius`
     loadQuestions()
-  }, [subject])
+  }, [subject, questionsPerSession])
 
   const loadQuestions = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/questions?subject=${subject}&limit=${QUESTIONS_PER_SESSION}`)
+      const res = await fetch(`/api/questions?subject=${subject}&limit=${questionsPerSession}`)
       const data = await res.json()
       console.log(`Questions API response:`, data.count, 'questions, success:', data.success)
       if (data.success && data.questions && data.questions.length > 0) {
-        setQuestions(fillQuestionSet(data.questions, QUESTIONS_PER_SESSION, subject))
+        setQuestions(fillQuestionSet(data.questions, questionsPerSession, subject))
         console.log(`✅ Loaded ${data.questions.length} questions from MongoDB`)
       } else {
         console.warn('No questions from MongoDB, using fallback. Error:', data.error)
@@ -186,7 +199,7 @@ export default function PracticeExam() {
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
         <p className="text-gray-600 font-medium">Loading questions from MongoDB...</p>
-        <p className="text-gray-400 text-sm mt-1">Getting {QUESTIONS_PER_SESSION} {subject} questions</p>
+        <p className="text-gray-400 text-sm mt-1">Getting {questionsPerSession} {subject} questions</p>
       </div>
     </div>
   )
@@ -227,6 +240,9 @@ export default function PracticeExam() {
   const currentExplanation = aiExplanation[currentQ]
   const isLoadingExplanation = loadingExplanation[currentQ] === true
   const isExplShown = showExplanation[currentQ]
+  const subjectName = formatSubjectName(subject)
+  const correctOption = q.answer >= 0 && q.answer < q.options.length ? q.options[q.answer] : null
+  const correctLabel = q.answer >= 0 && q.answer < 26 ? String.fromCharCode(65 + q.answer) : '?'
 
   const handleViewExplanation = () => {
     setShowExplanation(prev => ({ ...prev, [currentQ]: true }))
@@ -310,8 +326,8 @@ export default function PracticeExam() {
                   ? '✅ Correct! Great job!'
                   : (
                     <>
-                      ❌ Wrong. The answer is {String.fromCharCode(65 + q.answer)}:{' '}
-                      <MathText text={q.options[q.answer]} inline />
+                      ❌ Wrong. The answer is {correctLabel}:{' '}
+                      {correctOption ? <MathText text={correctOption} inline /> : 'Unknown'}
                     </>
                   )
                 }
@@ -367,6 +383,13 @@ export default function PracticeExam() {
             {currentQ + 1 >= questions.length ? '🏁 Finish Session' : 'Next Question →'}
           </button>
         )}
+
+        <button
+          onClick={() => navigate('/practice')}
+          className="w-full mt-4 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-100 transition-colors"
+        >
+          Tired of {subjectName}? Click here to select another subject
+        </button>
       </div>
     </div>
   )

@@ -5,9 +5,12 @@ const Question = require('../models/Question');
 const ENGLISH_QUESTION_COUNT = 60;
 const DEFAULT_SUBJECT_COUNT = 40;
 const ENGLISH_SUBJECT = 'english';
+const USE_OF_ENGLISH_SUBJECT = 'use of english';
+const MAX_PRACTICE_QUESTION_LIMIT = 100;
 
 function isEnglishSubject(value) {
-  return String(value || '').toLowerCase().trim() === ENGLISH_SUBJECT;
+  const normalized = String(value || '').toLowerCase().trim();
+  return normalized === ENGLISH_SUBJECT || normalized === USE_OF_ENGLISH_SUBJECT;
 }
 
 module.exports = async function handler(req, res) {
@@ -74,7 +77,11 @@ module.exports = async function handler(req, res) {
     if (year) matchStage.year = parseInt(year);
     if (topic) matchStage.topic = { $regex: new RegExp(topic, 'i') };
 
-    const requestedLimit = Math.min(parseInt(limit) || 20, 200);
+    const parsedLimit = parseInt(limit, 10);
+    const requestedLimit = Math.min(
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20,
+      MAX_PRACTICE_QUESTION_LIMIT
+    );
     const questions = isEnglishSubject(subjectClean)
       ? await Question.find(matchStage).sort({ year: 1, _id: 1 }).limit(requestedLimit).lean()
       : await Question.aggregate([

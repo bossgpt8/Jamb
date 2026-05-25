@@ -23,6 +23,7 @@ const questionApiLimiter = rateLimit({
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests. Please try again shortly.' }
 });
+const MAX_PRACTICE_QUESTION_LIMIT = 100;
 
 // Connect to MongoDB on startup
 connectDB().catch((err) => {
@@ -808,7 +809,11 @@ app.get('/api/questions', questionApiLimiter, async (req, res) => {
     // Use regex for case-insensitive match in case DB has mixed case
     const subjectRegex = new RegExp(`^${subjectClean}$`, 'i');
     
-    const requestedLimit = Math.min(parseInt(limit) || 20, 200);
+    const parsedLimit = parseInt(limit, 10);
+    const requestedLimit = Math.min(
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20,
+      MAX_PRACTICE_QUESTION_LIMIT
+    );
     const questions = isEnglishSubject(subjectClean)
       ? await Question.find({ subject: { $regex: subjectRegex } }).sort({ year: 1, _id: 1 }).limit(requestedLimit).lean()
       : await Question.aggregate([

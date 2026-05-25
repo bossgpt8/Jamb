@@ -1,9 +1,13 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import UserChip from '../components/UserChip'
 
+const DEFAULT_QUESTION_COUNT = 20
+const MAX_QUESTION_COUNT = 100
+
 export default function Practice() {
   const navigate = useNavigate()
+  const [questionCount, setQuestionCount] = useState(DEFAULT_QUESTION_COUNT)
 
   useEffect(() => {
     document.title = 'Practice Mode - Select Subject | JambGenius'
@@ -36,6 +40,12 @@ export default function Practice() {
     { id: 'computer studies', name: 'Computer Studies', icon: 'fa-laptop', color: 'indigo', tag: 'SCIENCE', desc: 'Programming, Hardware & Software' },
     { id: 'physical and health education', name: 'Physical and Health Education (PHE)', icon: 'fa-running', color: 'cyan', tag: 'SCIENCE', desc: 'Sports, Fitness & Health Science' },
   ]
+
+  const clampQuestionCount = (value) => {
+    const parsed = parseInt(value, 10)
+    if (!Number.isFinite(parsed)) return DEFAULT_QUESTION_COUNT
+    return Math.min(Math.max(parsed, 1), MAX_QUESTION_COUNT)
+  }
 
   return (
     <div className="bg-gray-50 font-sans page-fade-in">
@@ -73,11 +83,40 @@ export default function Practice() {
           <p className="text-gray-500 text-sm">Practice unlimited questions without time pressure</p>
         </div>
 
+        <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4 sm:p-5">
+          <label htmlFor="practice-question-count" className="block text-sm font-semibold text-gray-800 mb-2">
+            Questions per practice session (max {MAX_QUESTION_COUNT})
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              id="practice-question-count"
+              type="number"
+              min="1"
+              max={MAX_QUESTION_COUNT}
+              value={questionCount}
+              onChange={(e) => setQuestionCount(clampQuestionCount(e.target.value))}
+              className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="text-sm text-gray-500">Choose from 1 to {MAX_QUESTION_COUNT} questions</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[20, 40, 60, MAX_QUESTION_COUNT].map((count) => (
+              <button
+                key={count}
+                onClick={() => setQuestionCount(count)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${questionCount === count ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'}`}
+              >
+                {count}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
           {subjects.map((s) => (
             <div
               key={s.id}
-              onClick={() => navigate(`/practice/exam?subject=${s.id}`)}
+              onClick={() => navigate(`/practice/exam?subject=${s.id}&count=${questionCount}`)}
               className="bg-white rounded-xl p-4 sm:p-5 shadow-sm hover:shadow-lg transition-all border-2 border-transparent hover:border-blue-500 cursor-pointer"
             >
               <div className="flex items-center gap-3 sm:gap-4">
