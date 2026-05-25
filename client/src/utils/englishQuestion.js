@@ -8,6 +8,8 @@ const ENGLISH_SORT_RULES = [
 
 const FOCUS_CUE = /\b(nearest|closest|same|similar|synonym|opposite|antonym|meaning|replace|substitute)\b/i
 const MAX_TARGET_TEXT_LENGTH = 80
+const MAX_PATTERN_INPUT_LENGTH = 2000
+const MIN_UPPERCASE_TARGET_LENGTH = 3
 const EXPLICIT_HIGHLIGHT_PATTERN = /<\s*(?:b|strong|u)\s*>([\s\S]*?)<\s*\/\s*(?:b|strong|u)\s*>|\*\*([^*]+)\*\*|__([^_]+)__/gi
 const QUOTED_TARGET_PATTERN = /["“']([^"”']{2,80})["”']/
 
@@ -37,7 +39,7 @@ export function sortEnglishQuestionsForDisplay(questions, subject) {
 }
 
 function parseExplicitHighlights(text) {
-  const source = String(text || '')
+  const source = String(text || '').slice(0, MAX_PATTERN_INPUT_LENGTH)
   const pattern = new RegExp(EXPLICIT_HIGHLIGHT_PATTERN)
   const segments = []
   let cursor = 0
@@ -65,7 +67,7 @@ function parseExplicitHighlights(text) {
 }
 
 function inferFocusSpan(text) {
-  const source = String(text || '')
+  const source = String(text || '').slice(0, MAX_PATTERN_INPUT_LENGTH)
   if (!source) return null
   if (!FOCUS_CUE.test(source)) return null
 
@@ -80,7 +82,9 @@ function inferFocusSpan(text) {
 
   const cueIndex = source.search(FOCUS_CUE)
   const searchFrom = cueIndex >= 0 ? cueIndex : 0
-  const upperMatch = source.slice(searchFrom).match(/\b[A-Z][A-Z-]{2,}\b/)
+  const upperMatch = source
+    .slice(searchFrom)
+    .match(new RegExp(`\\b[A-Z][A-Z-]{${MIN_UPPERCASE_TARGET_LENGTH - 1},}\\b`))
   if (upperMatch) {
     const start = searchFrom + upperMatch.index
     return { start, end: start + upperMatch[0].length }
