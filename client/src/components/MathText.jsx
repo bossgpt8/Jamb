@@ -8,6 +8,55 @@ const DELIMITERS = [
 ]
 const MAX_EXPRESSION_LENGTH = 1000
 
+// Unicode superscript/subscript digit maps
+const SUPERSCRIPT_MAP = { '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', 'ⁿ': 'n' }
+const SUBSCRIPT_MAP = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' }
+
+// Ordered list of [regex, LaTeX command] replacements for standalone Unicode math symbols
+const SYMBOL_REPLACEMENTS = [
+  [/√\(([^)]+)\)/g, (_, e) => `$\\sqrt{${e}}$`],
+  [/√(\d+(?:\.\d+)?)/g, (_, n) => `$\\sqrt{${n}}$`],
+  [/√(\w)/g, (_, c) => `$\\sqrt{${c}}$`],
+  [/π/g, '$\\pi$'],
+  [/θ/g, '$\\theta$'],
+  [/α/g, '$\\alpha$'],
+  [/β/g, '$\\beta$'],
+  [/γ/g, '$\\gamma$'],
+  [/Δ/g, '$\\Delta$'],
+  [/δ/g, '$\\delta$'],
+  [/λ/g, '$\\lambda$'],
+  [/μ/g, '$\\mu$'],
+  [/σ/g, '$\\sigma$'],
+  [/Σ/g, '$\\Sigma$'],
+  [/∞/g, '$\\infty$'],
+  [/≤/g, '$\\leq$'],
+  [/≥/g, '$\\geq$'],
+  [/×/g, '$\\times$'],
+  [/÷/g, '$\\div$'],
+  [/±/g, '$\\pm$'],
+  [/≠/g, '$\\neq$'],
+  [/∴/g, '$\\therefore$'],
+  [/∈/g, '$\\in$'],
+  [/∉/g, '$\\notin$'],
+  [/∑/g, '$\\sum$'],
+  [/∏/g, '$\\prod$'],
+  [/∫/g, '$\\int$'],
+]
+
+function normalizeUnicodeMath(text) {
+  if (!text) return text
+  let s = String(text)
+  // x² → $x^{2}$, x³ → $x^{3}$, etc.
+  s = s.replace(/(\w)([²³⁴⁵⁶⁷⁸⁹ⁿ])/g, (_, base, sup) => `$${base}^{${SUPERSCRIPT_MAP[sup]}}$`)
+  // x₁ → $x_{1}$, etc.
+  s = s.replace(/(\w)([₀₁₂₃₄₅₆₇₈₉])/g, (_, base, sub) => `$${base}_{${SUBSCRIPT_MAP[sub]}}$`)
+  // √ and other math symbols
+  for (const [re, replacement] of SYMBOL_REPLACEMENTS) {
+    s = s.replace(re, replacement)
+  }
+  return s
+}
+
 function findNextDelimiter(source, fromIndex) {
   let next = null
 
@@ -81,14 +130,22 @@ function renderMath(expression, displayMode) {
 }
 
 export default function MathText({ text, inline = false, className = '' }) {
-  const segments = parseMathSegments(text)
+  // Expand each plain-text segment by converting Unicode math to $...$ delimiters,
+  // then re-parse to pick up the new inline math nodes.
+  const segments = parseMathSegments(text).flatMap((segment) => {
+    if (segment.type !== 'text') return [segment]
+    const normalized = normalizeUnicodeMath(segment.value)
+    if (normalized === segment.value) return [segment]
+    return parseMathSegments(normalized)
+  })
+
   const Tag = inline ? 'span' : 'div'
   const tagClass = `${inline ? 'inline' : 'block'} math-content ${className}`.trim()
 
   return (
     <Tag className={tagClass}>
       {segments.map((segment, index) => {
-        const key = `${segment.type}-${segment.start ?? index}-${segment.end ?? index}`
+        const key = `${segment.type}-${index}`
 
         if (segment.type === 'text') {
           return (
