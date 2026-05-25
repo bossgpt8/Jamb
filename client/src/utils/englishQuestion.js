@@ -8,6 +8,8 @@ const ENGLISH_SORT_RULES = [
 
 const FOCUS_CUE = /\b(nearest|closest|same|similar|synonym|opposite|antonym|meaning|replace|substitute)\b/i
 const MAX_TARGET_TEXT_LENGTH = 80
+const EXPLICIT_HIGHLIGHT_PATTERN = /<\s*(?:b|strong|u)\s*>([\s\S]*?)<\s*\/\s*(?:b|strong|u)\s*>|\*\*([^*]+)\*\*|__([^_]+)__/gi
+const QUOTED_TARGET_PATTERN = /["“']([^"”']{2,80})["”']/
 
 function isEnglishSubject(subject) {
   const value = String(subject || '').toLowerCase().trim()
@@ -36,7 +38,7 @@ export function sortEnglishQuestionsForDisplay(questions, subject) {
 
 function parseExplicitHighlights(text) {
   const source = String(text || '')
-  const pattern = /<\s*(?:b|strong|u)\s*>([\s\S]*?)<\s*\/\s*(?:b|strong|u)\s*>|\*\*([^*]+)\*\*|__([^_]+)__/gi
+  const pattern = new RegExp(EXPLICIT_HIGHLIGHT_PATTERN)
   const segments = []
   let cursor = 0
   let hasHighlight = false
@@ -67,10 +69,10 @@ function inferFocusSpan(text) {
   if (!source) return null
   if (!FOCUS_CUE.test(source)) return null
 
-  const quoted = source.match(new RegExp(`["“']([^"”']{2,${MAX_TARGET_TEXT_LENGTH}})["”']`))
+  const quoted = source.match(QUOTED_TARGET_PATTERN)
   if (quoted) {
     const focused = quoted[1].trim()
-    if (focused) {
+    if (focused && focused.length <= MAX_TARGET_TEXT_LENGTH) {
       const start = source.indexOf(quoted[0]) + quoted[0].indexOf(focused)
       return { start, end: start + focused.length }
     }
