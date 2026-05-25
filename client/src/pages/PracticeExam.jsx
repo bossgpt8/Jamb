@@ -18,7 +18,7 @@ export default function PracticeExam() {
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
   const [aiExplanation, setAiExplanation] = useState({}) // { [qIndex]: string }
-  const [loadingExplanation, setLoadingExplanation] = useState(false)
+  const [loadingExplanation, setLoadingExplanation] = useState({}) // { [qIndex]: bool }
   const [showExplanation, setShowExplanation] = useState({}) // { [qIndex]: bool }
 
   useEffect(() => {
@@ -102,8 +102,8 @@ export default function PracticeExam() {
 
   const fetchAIExplanation = async (qIdx) => {
     const q = questions[qIdx]
-    if (!q || aiExplanation[qIdx]) return
-    setLoadingExplanation(true)
+    if (!q || aiExplanation[qIdx] || loadingExplanation[qIdx]) return
+    setLoadingExplanation(prev => ({ ...prev, [qIdx]: true }))
     try {
       const opts = {}
       q.options.forEach((o, i) => { opts[String.fromCharCode(65 + i)] = o })
@@ -125,7 +125,11 @@ export default function PracticeExam() {
     } catch {
       setAiExplanation(prev => ({ ...prev, [qIdx]: q.explanation || 'Could not load explanation.' }))
     } finally {
-      setLoadingExplanation(false)
+      setLoadingExplanation(prev => {
+        const next = { ...prev }
+        delete next[qIdx]
+        return next
+      })
     }
   }
 
@@ -166,6 +170,17 @@ export default function PracticeExam() {
     setDone(true)
   }
 
+  const handleRetry = () => {
+    setCurrentQ(0)
+    setSelected({})
+    setAnswered({})
+    setAiExplanation({})
+    setLoadingExplanation({})
+    setShowExplanation({})
+    setDone(false)
+    loadQuestions()
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
@@ -193,7 +208,7 @@ export default function PracticeExam() {
           </p>
           <div className="flex gap-3">
             <button onClick={() => navigate('/practice')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors">New Subject</button>
-            <button onClick={() => { setCurrentQ(0); setSelected({}); setAnswered({}); setAiExplanation({}); setShowExplanation({}); setDone(false); loadQuestions() }}
+            <button onClick={handleRetry}
               className="flex-1 border-2 border-blue-600 text-blue-600 py-3 rounded-xl font-semibold hover:bg-blue-50 transition-colors">Retry</button>
           </div>
           <button onClick={() => navigate('/analytics')} className="w-full mt-3 text-gray-500 hover:text-blue-600 text-sm">
@@ -210,11 +225,12 @@ export default function PracticeExam() {
   const isBookmarked = bookmarks.some(b => b.id === q.id && b.subject === subject)
   const progress = Math.round(((currentQ + (isAnswered ? 1 : 0)) / questions.length) * 100)
   const currentExplanation = aiExplanation[currentQ]
+  const isLoadingExplanation = loadingExplanation[currentQ] === true
   const isExplShown = showExplanation[currentQ]
 
   const handleViewExplanation = () => {
     setShowExplanation(prev => ({ ...prev, [currentQ]: true }))
-    if (!aiExplanation[currentQ] && !loadingExplanation) {
+    if (!aiExplanation[currentQ] && !isLoadingExplanation) {
       fetchAIExplanation(currentQ)
     }
   }
@@ -325,7 +341,7 @@ export default function PracticeExam() {
                   <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">AI Explanation · Grok</span>
                 </div>
 
-                {loadingExplanation && !currentExplanation ? (
+                {isLoadingExplanation && !currentExplanation ? (
                   <div className="flex items-center gap-2 text-indigo-500">
                     <div className="flex gap-1">
                       {[0, 1, 2].map(d => (

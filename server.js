@@ -18,7 +18,7 @@ app.use(express.static(path.join(__dirname)));
 
 const questionApiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120,
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests. Please try again shortly.' }
