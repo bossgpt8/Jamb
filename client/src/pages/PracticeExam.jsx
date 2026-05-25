@@ -17,6 +17,7 @@ export default function PracticeExam() {
   const [done, setDone] = useState(false)
   const [aiExplanation, setAiExplanation] = useState({}) // { [qIndex]: string }
   const [loadingExplanation, setLoadingExplanation] = useState(false)
+  const [showExplanation, setShowExplanation] = useState({}) // { [qIndex]: bool }
 
   useEffect(() => {
     document.title = `Practice ${subject} | JambGenius`
@@ -130,8 +131,6 @@ export default function PracticeExam() {
     if (!q || answered[currentQ] !== undefined) return
     setSelected(prev => ({ ...prev, [currentQ]: optionIndex }))
     setAnswered(prev => ({ ...prev, [currentQ]: true }))
-    // Fetch AI explanation immediately after answering
-    fetchAIExplanation(currentQ)
   }
 
   const toggleBookmark = () => {
@@ -191,7 +190,7 @@ export default function PracticeExam() {
           </p>
           <div className="flex gap-3">
             <button onClick={() => navigate('/practice')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors">New Subject</button>
-            <button onClick={() => { setCurrentQ(0); setSelected({}); setAnswered({}); setAiExplanation({}); setDone(false); loadQuestions() }}
+            <button onClick={() => { setCurrentQ(0); setSelected({}); setAnswered({}); setAiExplanation({}); setShowExplanation({}); setDone(false); loadQuestions() }}
               className="flex-1 border-2 border-blue-600 text-blue-600 py-3 rounded-xl font-semibold hover:bg-blue-50 transition-colors">Retry</button>
           </div>
           <button onClick={() => navigate('/analytics')} className="w-full mt-3 text-gray-500 hover:text-blue-600 text-sm">
@@ -208,6 +207,14 @@ export default function PracticeExam() {
   const isBookmarked = bookmarks.some(b => b.id === q.id && b.subject === subject)
   const progress = Math.round(((currentQ + (isAnswered ? 1 : 0)) / questions.length) * 100)
   const currentExplanation = aiExplanation[currentQ]
+  const isExplShown = showExplanation[currentQ]
+
+  const handleViewExplanation = () => {
+    setShowExplanation(prev => ({ ...prev, [currentQ]: true }))
+    if (!aiExplanation[currentQ] && !loadingExplanation) {
+      fetchAIExplanation(currentQ)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans page-fade-in">
@@ -292,31 +299,46 @@ export default function PracticeExam() {
               </span>
             </div>
 
-            {/* AI explanation body */}
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 px-4 py-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs">🤖</span>
-                </div>
-                <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">AI Explanation · Grok</span>
-              </div>
-
-              {loadingExplanation && !currentExplanation ? (
-                <div className="flex items-center gap-2 text-indigo-500">
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map(d => (
-                      <div key={d} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d * 150}ms` }} />
-                    ))}
+            {/* View AI Explanation button or AI explanation body */}
+            {!isExplShown ? (
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 px-4 py-3">
+                <button
+                  onClick={handleViewExplanation}
+                  className="flex items-center gap-2 text-indigo-600 font-semibold text-sm hover:text-indigo-800 transition-colors"
+                >
+                  <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xs">🤖</span>
                   </div>
-                  <span className="text-sm text-indigo-500">Generating explanation...</span>
+                  View AI Explanation
+                  <i className="fas fa-chevron-down text-xs"></i>
+                </button>
+              </div>
+            ) : (
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 px-4 py-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xs">🤖</span>
+                  </div>
+                  <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">AI Explanation · Grok</span>
                 </div>
-              ) : (
-                <MathText
-                  text={currentExplanation || q.explanation || 'Loading explanation...'}
-                  className="text-gray-700 text-sm leading-relaxed"
-                />
-              )}
-            </div>
+
+                {loadingExplanation && !currentExplanation ? (
+                  <div className="flex items-center gap-2 text-indigo-500">
+                    <div className="flex gap-1">
+                      {[0, 1, 2].map(d => (
+                        <div key={d} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d * 150}ms` }} />
+                      ))}
+                    </div>
+                    <span className="text-sm text-indigo-500">Generating explanation...</span>
+                  </div>
+                ) : (
+                  <MathText
+                    text={currentExplanation || q.explanation || 'Loading explanation...'}
+                    className="text-gray-700 text-sm leading-relaxed"
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
 

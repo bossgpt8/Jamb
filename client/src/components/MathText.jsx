@@ -12,11 +12,20 @@ const MAX_EXPRESSION_LENGTH = 1000
 const SUPERSCRIPT_MAP = { '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', 'ⁿ': 'n' }
 const SUBSCRIPT_MAP = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' }
 
+// Allow only safe characters inside captured LaTeX expressions to prevent injection
+function sanitizeMathExpr(expr) {
+  return String(expr).replace(/[^a-zA-Z0-9+\-*/^_.() ]/g, '')
+}
+
 // Ordered list of [regex, LaTeX command] replacements for standalone Unicode math symbols
 const SYMBOL_REPLACEMENTS = [
-  [/√\(([^)]+)\)/g, (_, e) => `$\\sqrt{${e}}$`],
-  [/√(\d+(?:\.\d+)?)/g, (_, n) => `$\\sqrt{${n}}$`],
-  [/√(\w)/g, (_, c) => `$\\sqrt{${c}}$`],
+  // Plain-text exponent notation: 10^4, 2^8, x^2, x^(1/3) → $10^{4}$, $2^{8}$, $x^{2}$, $x^{(1/3)}$
+  [/([a-zA-Z0-9]+)\^(\{[^}]*\})/g, (_, base, exp) => `$${sanitizeMathExpr(base)}^{${sanitizeMathExpr(exp.slice(1, -1))}}$`],
+  [/([a-zA-Z0-9]+)\^\(([^)]+)\)/g, (_, base, exp) => `$${sanitizeMathExpr(base)}^{(${sanitizeMathExpr(exp)})}$`],
+  [/([a-zA-Z0-9]+)\^(-?\d+)/g, (_, base, exp) => `$${sanitizeMathExpr(base)}^{${sanitizeMathExpr(exp)}}$`],
+  [/√\(([^)]+)\)/g, (_, e) => `$\\sqrt{${sanitizeMathExpr(e)}}$`],
+  [/√(\d+(?:\.\d+)?)/g, (_, n) => `$\\sqrt{${sanitizeMathExpr(n)}}$`],
+  [/√(\w)/g, (_, c) => `$\\sqrt{${sanitizeMathExpr(c)}}$`],
   [/π/g, '$\\pi$'],
   [/θ/g, '$\\theta$'],
   [/α/g, '$\\alpha$'],
