@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { auth } from '../firebase'
 import { onAuthStateChanged } from 'firebase/auth'
+import MathText from '../components/MathText'
 
 const EXAM_DURATION = 2 * 60 * 60 // 2 hours in seconds
 
@@ -447,8 +448,8 @@ export default function ExamRoom() {
                                 <div className="flex items-start justify-between gap-4 mb-3">
                                   <div>
                                     <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Question {item.index + 1}</p>
-                                    <h4 className="text-lg font-semibold text-gray-900 leading-relaxed">{item.question}</h4>
-                                    {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> {item.passage}</p> : null}
+                                    <h4 className="text-lg font-semibold text-gray-900 leading-relaxed"><MathText text={item.question} inline /></h4>
+                                    {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> <MathText text={item.passage} inline /></p> : null}
                                   </div>
                                   <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${item.selectedIndex === undefined ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
                                     {item.selectedIndex === undefined ? 'Unanswered' : 'Incorrect'}
@@ -459,19 +460,27 @@ export default function ExamRoom() {
                                   <div className="rounded-xl bg-white border border-red-200 p-4">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-red-600 mb-1">Your answer</p>
                                     <p className="text-gray-900 font-medium">
-                                      {item.selectedIndex !== undefined ? `${String.fromCharCode(65 + item.selectedIndex)}. ${item.selectedAnswer || 'No answer selected'}` : 'Not answered'}
+                                      {item.selectedIndex !== undefined ? (
+                                        <>
+                                          {String.fromCharCode(65 + item.selectedIndex)}.{` `}
+                                          <MathText text={item.selectedAnswer || 'No answer selected'} inline />
+                                        </>
+                                      ) : 'Not answered'}
                                     </p>
                                   </div>
                                   <div className="rounded-xl bg-white border border-green-200 p-4">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-green-600 mb-1">Correct answer</p>
-                                    <p className="text-gray-900 font-medium">{String.fromCharCode(65 + item.correctIndex)}. {item.correctAnswer || 'Unavailable'}</p>
+                                    <p className="text-gray-900 font-medium">
+                                      {String.fromCharCode(65 + item.correctIndex)}.{` `}
+                                      <MathText text={item.correctAnswer || 'Unavailable'} inline />
+                                    </p>
                                   </div>
                                 </div>
 
                                 {item.explanation ? (
                                   <div className="mt-4 rounded-xl bg-indigo-50 border border-indigo-100 p-4">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 mb-1">Explanation</p>
-                                    <p className="text-sm text-gray-700 leading-relaxed">{item.explanation}</p>
+                                    <MathText text={item.explanation} className="text-sm text-gray-700 leading-relaxed" />
                                   </div>
                                 ) : null}
                               </div>
@@ -486,9 +495,9 @@ export default function ExamRoom() {
                             <div className="flex items-start justify-between gap-4 mb-3">
                               <div>
                                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Question {item.index + 1}</p>
-                                <h4 className="text-lg font-semibold text-gray-900 leading-relaxed">{item.question}</h4>
+                                <h4 className="text-lg font-semibold text-gray-900 leading-relaxed"><MathText text={item.question} inline /></h4>
                                 <p className="text-xs mt-1 text-gray-500 capitalize">Subject: {item.subject || 'General'}</p>
-                                {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> {item.passage}</p> : null}
+                                {item.passage ? <p className="mt-3 text-sm text-gray-700 leading-relaxed whitespace-pre-line"><span className="font-semibold text-blue-700">Passage:</span> <MathText text={item.passage} inline /></p> : null}
                               </div>
                               <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${item.selectedIndex === undefined ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
                                 {item.selectedIndex === undefined ? 'Unanswered' : 'Incorrect'}
@@ -499,19 +508,27 @@ export default function ExamRoom() {
                               <div className="rounded-xl bg-white border border-red-200 p-4">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-red-600 mb-1">Your answer</p>
                                 <p className="text-gray-900 font-medium">
-                                  {item.selectedIndex !== undefined ? `${String.fromCharCode(65 + item.selectedIndex)}. ${item.selectedAnswer || 'No answer selected'}` : 'Not answered'}
+                                  {item.selectedIndex !== undefined ? (
+                                    <>
+                                      {String.fromCharCode(65 + item.selectedIndex)}.{` `}
+                                      <MathText text={item.selectedAnswer || 'No answer selected'} inline />
+                                    </>
+                                  ) : 'Not answered'}
                                 </p>
                               </div>
                               <div className="rounded-xl bg-white border border-green-200 p-4">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-green-600 mb-1">Correct answer</p>
-                                <p className="text-gray-900 font-medium">{String.fromCharCode(65 + item.correctIndex)}. {item.correctAnswer || 'Unavailable'}</p>
+                                <p className="text-gray-900 font-medium">
+                                  {String.fromCharCode(65 + item.correctIndex)}.{` `}
+                                  <MathText text={item.correctAnswer || 'Unavailable'} inline />
+                                </p>
                               </div>
                             </div>
 
                             {item.explanation ? (
                               <div className="mt-4 rounded-xl bg-indigo-50 border border-indigo-100 p-4">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700 mb-1">Explanation</p>
-                                <p className="text-sm text-gray-700 leading-relaxed">{item.explanation}</p>
+                                <MathText text={item.explanation} className="text-sm text-gray-700 leading-relaxed" />
                               </div>
                             ) : null}
                           </div>
@@ -590,11 +607,11 @@ export default function ExamRoom() {
                 {q.passage ? (
                   <div className="mb-4 rounded-lg bg-gray-900/60 border border-gray-700 p-4">
                     <p className="text-xs uppercase tracking-wide text-orange-300 mb-2">Passage</p>
-                    <p className="text-gray-200 text-sm leading-relaxed">{q.passage}</p>
+                    <MathText text={q.passage} className="text-gray-200 text-sm leading-relaxed" />
                   </div>
                 ) : null}
                 <p className="text-gray-400 text-sm mb-3">Question {currentQ + 1} of {questions.length}</p>
-                <p className="text-white text-lg font-medium leading-relaxed">{q.question}</p>
+                <MathText text={q.question} className="text-white text-lg font-medium leading-relaxed" />
               </div>
               <div className="space-y-3">
                 {q.options.map((opt, i) => {
@@ -605,7 +622,8 @@ export default function ExamRoom() {
                       onClick={() => setAnswers(prev => ({ ...prev, [currentQ]: i }))}
                       className={`w-full p-4 text-left rounded-xl border-2 font-medium transition-all ${isSelected ? 'border-orange-500 bg-orange-500/20 text-orange-300' : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-orange-400 hover:bg-gray-700'}`}
                     >
-                      <span className="mr-3 font-bold text-orange-400">{String.fromCharCode(65 + i)}.</span>{opt}
+                      <span className="mr-3 font-bold text-orange-400">{String.fromCharCode(65 + i)}.</span>
+                      <MathText text={opt} inline />
                     </button>
                   )
                 })}

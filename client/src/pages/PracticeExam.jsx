@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import MathText from '../components/MathText'
 
 const QUESTIONS_PER_SESSION = 20
 
@@ -235,11 +236,11 @@ export default function PracticeExam() {
           {q.passage ? (
             <div className="mb-4 rounded-xl bg-gray-50 border border-gray-200 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600 mb-2">Passage</p>
-              <p className="text-sm text-gray-700 leading-relaxed">{q.passage}</p>
+              <MathText text={q.passage} className="text-sm text-gray-700 leading-relaxed" />
             </div>
           ) : null}
           <p className="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Question {currentQ + 1} of {questions.length}</p>
-          <p className="text-lg font-semibold text-gray-900 leading-relaxed">{q.question}</p>
+          <MathText text={q.question} className="text-lg font-semibold text-gray-900 leading-relaxed" />
           {q.year && <p className="text-xs text-gray-400 mt-2">JAMB {q.year}</p>}
         </div>
 
@@ -265,7 +266,7 @@ export default function PracticeExam() {
                   isCorrect ? 'bg-green-500 text-white' :
                   isSelected ? 'bg-red-400 text-white' : 'bg-gray-100 text-gray-400'
                 }`}>{String.fromCharCode(65 + i)}</span>
-                <span className="flex-1">{opt}</span>
+                <MathText text={opt} inline className="flex-1" />
                 {isAnswered && isCorrect && <i className="fas fa-check-circle text-green-500 text-lg ml-auto flex-shrink-0"></i>}
                 {isAnswered && isSelected && !isCorrect && <i className="fas fa-times-circle text-red-400 text-lg ml-auto flex-shrink-0"></i>}
               </button>
@@ -278,10 +279,15 @@ export default function PracticeExam() {
           <div className="mb-4 rounded-2xl overflow-hidden border border-indigo-200 shadow-sm">
             {/* Result bar */}
             <div className={`px-4 py-3 flex items-center gap-2 ${selected[currentQ] === q.answer ? 'bg-green-50' : 'bg-red-50'}`}>
-              <span className={`font-bold text-sm ${selected[currentQ] === q.answer ? 'text-green-700' : 'text-red-700'}`}>
+              <span className={`font-bold text-sm leading-relaxed ${selected[currentQ] === q.answer ? 'text-green-700' : 'text-red-700'}`}>
                 {selected[currentQ] === q.answer
                   ? '✅ Correct! Great job!'
-                  : `❌ Wrong. The answer is ${String.fromCharCode(65 + q.answer)}: ${q.options[q.answer]}`
+                  : (
+                    <>
+                      ❌ Wrong. The answer is {String.fromCharCode(65 + q.answer)}:{' '}
+                      <MathText text={q.options[q.answer]} inline />
+                    </>
+                  )
                 }
               </span>
             </div>
@@ -305,9 +311,10 @@ export default function PracticeExam() {
                   <span className="text-sm text-indigo-500">Generating explanation...</span>
                 </div>
               ) : (
-                <p className="text-gray-700 text-sm leading-relaxed">
-                  {currentExplanation || q.explanation || 'Loading explanation...'}
-                </p>
+                <MathText
+                  text={currentExplanation || q.explanation || 'Loading explanation...'}
+                  className="text-gray-700 text-sm leading-relaxed"
+                />
               )}
             </div>
           </div>
