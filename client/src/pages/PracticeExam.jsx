@@ -1,12 +1,28 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import MathText from '../components/MathText'
+import QuestionPrompt from '../components/QuestionPrompt'
+import { sortEnglishQuestionsForDisplay } from '../utils/englishQuestion'
 
-const QUESTIONS_PER_SESSION = 20
+const DEFAULT_QUESTIONS_PER_SESSION = 20
+const MAX_QUESTIONS_PER_SESSION = 100
+
+function formatSubjectName(value) {
+  return String(value || '')
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
 
 export default function PracticeExam() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const subject = searchParams.get('subject') || 'mathematics'
+  const parsedCount = parseInt(searchParams.get('count') || '', 10)
+  const questionsPerSession = Number.isFinite(parsedCount)
+    ? Math.min(Math.max(parsedCount, 1), MAX_QUESTIONS_PER_SESSION)
+    : DEFAULT_QUESTIONS_PER_SESSION
   const [questions, setQuestions] = useState([])
   const [currentQ, setCurrentQ] = useState(0)
   const [selected, setSelected] = useState({})
@@ -15,21 +31,22 @@ export default function PracticeExam() {
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
   const [aiExplanation, setAiExplanation] = useState({}) // { [qIndex]: string }
-  const [loadingExplanation, setLoadingExplanation] = useState(false)
+  const [loadingExplanation, setLoadingExplanation] = useState({}) // { [qIndex]: bool }
+  const [showExplanation, setShowExplanation] = useState({}) // { [qIndex]: bool }
 
   useEffect(() => {
     document.title = `Practice ${subject} | JambGenius`
     loadQuestions()
-  }, [subject])
+  }, [subject, questionsPerSession])
 
   const loadQuestions = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/questions?subject=${subject}&limit=${QUESTIONS_PER_SESSION}`)
+      const res = await fetch(`/api/questions?subject=${subject}&limit=${questionsPerSession}`)
       const data = await res.json()
       console.log(`Questions API response:`, data.count, 'questions, success:', data.success)
       if (data.success && data.questions && data.questions.length > 0) {
-        setQuestions(fillQuestionSet(data.questions, QUESTIONS_PER_SESSION, subject))
+        setQuestions(fillQuestionSet(data.questions, questionsPerSession, subject))
         console.log(`✅ Loaded ${data.questions.length} questions from MongoDB`)
       } else {
         console.warn('No questions from MongoDB, using fallback. Error:', data.error)
@@ -84,7 +101,8 @@ export default function PracticeExam() {
   }
 
   const fillQuestionSet = (questionsList, limit, subj) => {
-    const source = questionsList.length > 0 ? questionsList : getFallback(subj)
+    const sourceBase = questionsList.length > 0 ? questionsList : getFallback(subj)
+    const source = sortEnglishQuestionsForDisplay(sourceBase, subj)
     const filled = []
     while (filled.length < limit && source.length > 0) {
       for (const question of source) {
@@ -97,8 +115,8 @@ export default function PracticeExam() {
 
   const fetchAIExplanation = async (qIdx) => {
     const q = questions[qIdx]
-    if (!q || aiExplanation[qIdx]) return
-    setLoadingExplanation(true)
+    if (!q || aiExplanation[qIdx] || loadingExplanation[qIdx]) return
+    setLoadingExplanation(prev => ({ ...prev, [qIdx]: true }))
     try {
       const opts = {}
       q.options.forEach((o, i) => { opts[String.fromCharCode(65 + i)] = o })
@@ -120,7 +138,11 @@ export default function PracticeExam() {
     } catch {
       setAiExplanation(prev => ({ ...prev, [qIdx]: q.explanation || 'Could not load explanation.' }))
     } finally {
-      setLoadingExplanation(false)
+      setLoadingExplanation(prev => {
+        const next = { ...prev }
+        delete next[qIdx]
+        return next
+      })
     }
   }
 
@@ -129,8 +151,6 @@ export default function PracticeExam() {
     if (!q || answered[currentQ] !== undefined) return
     setSelected(prev => ({ ...prev, [currentQ]: optionIndex }))
     setAnswered(prev => ({ ...prev, [currentQ]: true }))
-    // Fetch AI explanation immediately after answering
-    fetchAIExplanation(currentQ)
   }
 
   const toggleBookmark = () => {
@@ -163,12 +183,23 @@ export default function PracticeExam() {
     setDone(true)
   }
 
+  const handleRetry = () => {
+    setCurrentQ(0)
+    setSelected({})
+    setAnswered({})
+    setAiExplanation({})
+    setLoadingExplanation({})
+    setShowExplanation({})
+    setDone(false)
+    loadQuestions()
+  }
+
   if (loading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
         <p className="text-gray-600 font-medium">Loading questions from MongoDB...</p>
-        <p className="text-gray-400 text-sm mt-1">Getting {QUESTIONS_PER_SESSION} {subject} questions</p>
+        <p className="text-gray-400 text-sm mt-1">Getting {questionsPerSession} {subject} questions</p>
       </div>
     </div>
   )
@@ -190,7 +221,7 @@ export default function PracticeExam() {
           </p>
           <div className="flex gap-3">
             <button onClick={() => navigate('/practice')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors">New Subject</button>
-            <button onClick={() => { setCurrentQ(0); setSelected({}); setAnswered({}); setAiExplanation({}); setDone(false); loadQuestions() }}
+            <button onClick={handleRetry}
               className="flex-1 border-2 border-blue-600 text-blue-600 py-3 rounded-xl font-semibold hover:bg-blue-50 transition-colors">Retry</button>
           </div>
           <button onClick={() => navigate('/analytics')} className="w-full mt-3 text-gray-500 hover:text-blue-600 text-sm">
@@ -207,6 +238,18 @@ export default function PracticeExam() {
   const isBookmarked = bookmarks.some(b => b.id === q.id && b.subject === subject)
   const progress = Math.round(((currentQ + (isAnswered ? 1 : 0)) / questions.length) * 100)
   const currentExplanation = aiExplanation[currentQ]
+  const isLoadingExplanation = loadingExplanation[currentQ] === true
+  const isExplShown = showExplanation[currentQ]
+  const subjectName = formatSubjectName(subject)
+  const correctOption = q.answer >= 0 && q.answer < q.options.length ? q.options[q.answer] : null
+  const correctLabel = q.answer >= 0 && q.answer < 26 ? String.fromCharCode(65 + q.answer) : '?'
+
+  const handleViewExplanation = () => {
+    setShowExplanation(prev => ({ ...prev, [currentQ]: true }))
+    if (!aiExplanation[currentQ] && !isLoadingExplanation) {
+      fetchAIExplanation(currentQ)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans page-fade-in">
@@ -235,11 +278,11 @@ export default function PracticeExam() {
           {q.passage ? (
             <div className="mb-4 rounded-xl bg-gray-50 border border-gray-200 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600 mb-2">Passage</p>
-              <p className="text-sm text-gray-700 leading-relaxed">{q.passage}</p>
+              <MathText text={q.passage} className="text-sm text-gray-700 leading-relaxed" />
             </div>
           ) : null}
           <p className="text-xs text-gray-400 mb-1 font-medium uppercase tracking-wide">Question {currentQ + 1} of {questions.length}</p>
-          <p className="text-lg font-semibold text-gray-900 leading-relaxed">{q.question}</p>
+          <QuestionPrompt text={q.question} subject={q.subject || subject} className="text-lg font-semibold text-gray-900 leading-relaxed" />
           {q.year && <p className="text-xs text-gray-400 mt-2">JAMB {q.year}</p>}
         </div>
 
@@ -265,7 +308,7 @@ export default function PracticeExam() {
                   isCorrect ? 'bg-green-500 text-white' :
                   isSelected ? 'bg-red-400 text-white' : 'bg-gray-100 text-gray-400'
                 }`}>{String.fromCharCode(65 + i)}</span>
-                <span className="flex-1">{opt}</span>
+                <MathText text={opt} inline className="flex-1" />
                 {isAnswered && isCorrect && <i className="fas fa-check-circle text-green-500 text-lg ml-auto flex-shrink-0"></i>}
                 {isAnswered && isSelected && !isCorrect && <i className="fas fa-times-circle text-red-400 text-lg ml-auto flex-shrink-0"></i>}
               </button>
@@ -278,38 +321,59 @@ export default function PracticeExam() {
           <div className="mb-4 rounded-2xl overflow-hidden border border-indigo-200 shadow-sm">
             {/* Result bar */}
             <div className={`px-4 py-3 flex items-center gap-2 ${selected[currentQ] === q.answer ? 'bg-green-50' : 'bg-red-50'}`}>
-              <span className={`font-bold text-sm ${selected[currentQ] === q.answer ? 'text-green-700' : 'text-red-700'}`}>
+              <span className={`font-bold text-sm leading-relaxed ${selected[currentQ] === q.answer ? 'text-green-700' : 'text-red-700'}`}>
                 {selected[currentQ] === q.answer
                   ? '✅ Correct! Great job!'
-                  : `❌ Wrong. The answer is ${String.fromCharCode(65 + q.answer)}: ${q.options[q.answer]}`
+                  : (
+                    <>
+                      ❌ Wrong. The answer is {correctLabel}:{' '}
+                      {correctOption ? <MathText text={correctOption} inline /> : 'Unknown'}
+                    </>
+                  )
                 }
               </span>
             </div>
 
-            {/* AI explanation body */}
-            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 px-4 py-4">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-xs">🤖</span>
-                </div>
-                <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">AI Explanation · Grok</span>
-              </div>
-
-              {loadingExplanation && !currentExplanation ? (
-                <div className="flex items-center gap-2 text-indigo-500">
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map(d => (
-                      <div key={d} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d * 150}ms` }} />
-                    ))}
+            {/* View AI Explanation button or AI explanation body */}
+            {!isExplShown ? (
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 px-4 py-3">
+                <button
+                  onClick={handleViewExplanation}
+                  className="flex items-center gap-2 text-indigo-600 font-semibold text-sm hover:text-indigo-800 transition-colors"
+                >
+                  <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xs">🤖</span>
                   </div>
-                  <span className="text-sm text-indigo-500">Generating explanation...</span>
+                  View AI Explanation
+                  <i className="fas fa-chevron-down text-xs"></i>
+                </button>
+              </div>
+            ) : (
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 px-4 py-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xs">🤖</span>
+                  </div>
+                  <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">AI Explanation · Grok</span>
                 </div>
-              ) : (
-                <p className="text-gray-700 text-sm leading-relaxed">
-                  {currentExplanation || q.explanation || 'Loading explanation...'}
-                </p>
-              )}
-            </div>
+
+                {isLoadingExplanation && !currentExplanation ? (
+                  <div className="flex items-center gap-2 text-indigo-500">
+                    <div className="flex gap-1">
+                      {[0, 1, 2].map(d => (
+                        <div key={d} className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d * 150}ms` }} />
+                      ))}
+                    </div>
+                    <span className="text-sm text-indigo-500">Generating explanation...</span>
+                  </div>
+                ) : (
+                  <MathText
+                    text={currentExplanation || q.explanation || 'Loading explanation...'}
+                    className="text-gray-700 text-sm leading-relaxed"
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -319,6 +383,13 @@ export default function PracticeExam() {
             {currentQ + 1 >= questions.length ? '🏁 Finish Session' : 'Next Question →'}
           </button>
         )}
+
+        <button
+          onClick={() => navigate('/practice')}
+          className="w-full mt-4 border border-gray-300 text-gray-700 py-3 rounded-xl font-medium hover:bg-gray-100 transition-colors"
+        >
+          Tired of {subjectName}? Click here to select another subject
+        </button>
       </div>
     </div>
   )

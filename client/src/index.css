@@ -107,3 +107,27 @@
 body {
   font-family: 'Inter', system-ui, sans-serif;
 }
+
+/* Math rendering */
+.math-content {
+  line-height: 1.7;
+}
+
+.math-content .katex {
+  font-size: 1.06em;
+}
+
+.math-content .math-inline {
+  display: inline;
+}
+
+.math-content .math-display {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+}
+
+.math-content .math-display .katex-display {
+  margin: 0;
+}

@@ -3,6 +3,7 @@ const express = require('express');
 const https = require('https');
 const path = require('path');
 const mongoose = require('mongoose');
+const rateLimit = require('express-rate-limit');
 const { connectDB } = require('./db/mongoose');
 const User = require('./models/User');
 const ChatMessage = require('./models/ChatMessage');
@@ -14,6 +15,15 @@ const app = express();
 app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname)));
+
+const questionApiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests. Please try again shortly.' }
+});
+const MAX_PRACTICE_QUESTION_LIMIT = 100;
 
 // Connect to MongoDB on startup
 connectDB().catch((err) => {
@@ -780,8 +790,13 @@ function transformQuestion(q) {
   };
 }
 
+function isEnglishSubject(value) {
+  const normalized = String(value || '').toLowerCase().trim();
+  return normalized === 'english' || normalized === 'use of english';
+}
+
 // GET /api/questions?subject=english&limit=20
-app.get('/api/questions', async (req, res) => {
+app.get('/api/questions', questionApiLimiter, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { subject, limit = 20, year, topic } = req.query;
 
@@ -794,10 +809,17 @@ app.get('/api/questions', async (req, res) => {
     // Use regex for case-insensitive match in case DB has mixed case
     const subjectRegex = new RegExp(`^${subjectClean}$`, 'i');
     
-    const questions = await Question.aggregate([
-      { $match: { subject: { $regex: subjectRegex } } },
-      { $sample: { size: Math.min(parseInt(limit) || 20, 200) } }
-    ]);
+    const parsedLimit = parseInt(limit, 10);
+    const requestedLimit = Math.min(
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20,
+      MAX_PRACTICE_QUESTION_LIMIT
+    );
+    const questions = isEnglishSubject(subjectClean)
+      ? await Question.find({ subject: { $regex: subjectRegex } }).sort({ year: 1, _id: 1 }).limit(requestedLimit).lean()
+      : await Question.aggregate([
+          { $match: { subject: { $regex: subjectRegex } } },
+          { $sample: { size: requestedLimit } }
+        ]);
     
     console.log(`📚 Questions query: subject="${subjectClean}", found: ${questions.length}`);
 
@@ -809,7 +831,7 @@ app.get('/api/questions', async (req, res) => {
 });
 
 // GET /api/questions/exam?subjects=english,mathematics,physics,chemistry
-app.get('/api/questions/exam', async (req, res) => {
+app.get('/api/questions/exam', questionApiLimiter, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { subjects } = req.query;
 
@@ -822,12 +844,14 @@ app.get('/api/questions/exam', async (req, res) => {
     const allQuestions = [];
 
     for (const subject of subjectList) {
-      const count = subject === 'english' ? 60 : 40;
+      const count = isEnglishSubject(subject) ? 60 : 40;
       const subjectRegex = new RegExp(`^${subject}$`, 'i');
-      const qs = await Question.aggregate([
-        { $match: { subject: { $regex: subjectRegex } } },
-        { $sample: { size: count } }
-      ]);
+      const qs = isEnglishSubject(subject)
+        ? await Question.find({ subject: { $regex: subjectRegex } }).sort({ year: 1, _id: 1 }).limit(count).lean()
+        : await Question.aggregate([
+            { $match: { subject: { $regex: subjectRegex } } },
+            { $sample: { size: count } }
+          ]);
       console.log(`📝 Exam subject "${subject}": ${qs.length} questions`);
       allQuestions.push(...qs.map(transformQuestion));
     }
@@ -840,7 +864,7 @@ app.get('/api/questions/exam', async (req, res) => {
 });
 
 // GET /api/questions/daily?count=10
-app.get('/api/questions/daily', async (req, res) => {
+app.get('/api/questions/daily', questionApiLimiter, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const count = Math.min(parseInt(req.query.count) || 10, 50);
 

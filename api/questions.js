@@ -4,6 +4,14 @@ const Question = require('../models/Question');
 
 const ENGLISH_QUESTION_COUNT = 60;
 const DEFAULT_SUBJECT_COUNT = 40;
+const ENGLISH_SUBJECT = 'english';
+const USE_OF_ENGLISH_SUBJECT = 'use of english';
+const MAX_PRACTICE_QUESTION_LIMIT = 100;
+
+function isEnglishSubject(value) {
+  const normalized = String(value || '').toLowerCase().trim();
+  return normalized === ENGLISH_SUBJECT || normalized === USE_OF_ENGLISH_SUBJECT;
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -36,12 +44,20 @@ module.exports = async function handler(req, res) {
       const subjectList = subjects.split(',').map(s => s.toLowerCase().trim());
       const allQuestions = [];
       for (const subject of subjectList) {
-        const count = subject === 'english' ? ENGLISH_QUESTION_COUNT : DEFAULT_SUBJECT_COUNT;
+        const count = isEnglishSubject(subject) ? ENGLISH_QUESTION_COUNT : DEFAULT_SUBJECT_COUNT;
         const subjectRegex = new RegExp(`^${subject}$`, 'i');
-        const qs = await Question.aggregate([
-          { $match: { subject: { $regex: subjectRegex } } },
-          { $sample: { size: count } }
-        ]);
+        let qs;
+        if (isEnglishSubject(subject)) {
+          qs = await Question.find({ subject: { $regex: subjectRegex } })
+            .sort({ year: 1, _id: 1 })
+            .limit(count)
+            .lean();
+        } else {
+          qs = await Question.aggregate([
+            { $match: { subject: { $regex: subjectRegex } } },
+            { $sample: { size: count } }
+          ]);
+        }
         console.log(`📝 Exam subject "${subject}": ${qs.length} questions`);
         allQuestions.push(...qs.map(transformQuestion));
       }
@@ -61,10 +77,17 @@ module.exports = async function handler(req, res) {
     if (year) matchStage.year = parseInt(year);
     if (topic) matchStage.topic = { $regex: new RegExp(topic, 'i') };
 
-    const questions = await Question.aggregate([
-      { $match: matchStage },
-      { $sample: { size: Math.min(parseInt(limit) || 20, 200) } }
-    ]);
+    const parsedLimit = parseInt(limit, 10);
+    const requestedLimit = Math.min(
+      Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20,
+      MAX_PRACTICE_QUESTION_LIMIT
+    );
+    const questions = isEnglishSubject(subjectClean)
+      ? await Question.find(matchStage).sort({ year: 1, _id: 1 }).limit(requestedLimit).lean()
+      : await Question.aggregate([
+          { $match: matchStage },
+          { $sample: { size: requestedLimit } }
+        ]);
 
     console.log(`📚 Questions query: subject="${subjectClean}", found: ${questions.length}`);
     return res.status(200).json({ success: true, questions: questions.map(transformQuestion), count: questions.length });
