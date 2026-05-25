@@ -1,40 +1,63 @@
 import katex from 'katex'
 
-const MATH_PATTERN = /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|\$(?:\\.|[^$\n])+\$)/g
+const DELIMITERS = [
+  { open: '$$', close: '$$', display: true },
+  { open: '\\[', close: '\\]', display: true },
+  { open: '\\(', close: '\\)', display: false },
+  { open: '$', close: '$', display: false }
+]
+
+function findNextDelimiter(source, fromIndex) {
+  let next = null
+
+  for (const delimiter of DELIMITERS) {
+    const idx = source.indexOf(delimiter.open, fromIndex)
+    if (idx === -1) continue
+    if (!next || idx < next.index) {
+      next = { index: idx, delimiter }
+    }
+  }
+
+  return next
+}
 
 function parseMathSegments(text) {
   if (!text) return []
 
   const source = String(text)
   const segments = []
-  let lastIndex = 0
-  let match
+  let cursor = 0
 
-  while ((match = MATH_PATTERN.exec(source)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({ type: 'text', value: source.slice(lastIndex, match.index) })
+  while (cursor < source.length) {
+    const next = findNextDelimiter(source, cursor)
+    if (!next) {
+      segments.push({ type: 'text', value: source.slice(cursor) })
+      break
     }
 
-    const token = match[0]
-    const isDisplay = token.startsWith('$$') || token.startsWith('\\[')
-    let expression = token
+    if (next.index > cursor) {
+      segments.push({ type: 'text', value: source.slice(cursor, next.index) })
+    }
 
-    if (token.startsWith('$$') && token.endsWith('$$')) expression = token.slice(2, -2)
-    else if (token.startsWith('\\[') && token.endsWith('\\]')) expression = token.slice(2, -2)
-    else if (token.startsWith('\\(') && token.endsWith('\\)')) expression = token.slice(2, -2)
-    else if (token.startsWith('$') && token.endsWith('$')) expression = token.slice(1, -1)
+    const { delimiter } = next
+    const start = next.index + delimiter.open.length
+    const end = source.indexOf(delimiter.close, start)
+
+    if (end === -1) {
+      segments.push({ type: 'text', value: source.slice(next.index) })
+      break
+    }
+
+    const expression = source.slice(start, end)
+    const raw = source.slice(next.index, end + delimiter.close.length)
 
     if (!expression.trim()) {
-      segments.push({ type: 'text', value: token })
+      segments.push({ type: 'text', value: raw })
     } else {
-      segments.push({ type: 'math', value: expression, display: isDisplay, raw: token })
+      segments.push({ type: 'math', value: expression, display: delimiter.display, raw })
     }
 
-    lastIndex = match.index + token.length
-  }
-
-  if (lastIndex < source.length) {
-    segments.push({ type: 'text', value: source.slice(lastIndex) })
+    cursor = end + delimiter.close.length
   }
 
   return segments.length ? segments : [{ type: 'text', value: source }]
@@ -55,10 +78,11 @@ function renderMath(expression, displayMode) {
 
 export default function MathText({ text, inline = false, className = '' }) {
   const segments = parseMathSegments(text)
+  const Tag = inline ? 'span' : 'div'
   const tagClass = `${inline ? 'inline' : 'block'} math-content ${className}`.trim()
 
   return (
-    <span className={tagClass}>
+    <Tag className={tagClass}>
       {segments.map((segment, index) => {
         if (segment.type === 'text') {
           return (
@@ -85,6 +109,6 @@ export default function MathText({ text, inline = false, className = '' }) {
           />
         )
       })}
-    </span>
+    </Tag>
   )
 }
