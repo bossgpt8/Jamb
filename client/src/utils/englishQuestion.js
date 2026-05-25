@@ -18,10 +18,6 @@ function isEnglishSubject(subject) {
   return value === 'english' || value === 'use of english'
 }
 
-function sanitizeHighlightText(value) {
-  return String(value || '').replace(/<[^>]*>/g, '').trim()
-}
-
 function rankEnglishQuestion(questionText) {
   const text = String(questionText || '')
   for (let i = 0; i < ENGLISH_SORT_RULES.length; i += 1) {
@@ -55,7 +51,7 @@ function parseExplicitHighlights(text) {
     if (match.index > cursor) {
       segments.push({ text: source.slice(cursor, match.index), highlight: false })
     }
-    const highlightedText = sanitizeHighlightText(match[1] || match[2] || match[3] || '')
+    const highlightedText = String(match[1] || match[2] || match[3] || '').trim()
     if (highlightedText) {
       hasHighlight = true
       segments.push({ text: highlightedText, highlight: true })
