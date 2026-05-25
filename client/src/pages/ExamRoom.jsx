@@ -462,7 +462,7 @@ export default function ExamRoom() {
                                     <p className="text-gray-900 font-medium">
                                       {item.selectedIndex !== undefined ? (
                                         <>
-                                          {String.fromCharCode(65 + item.selectedIndex)}.{` `}
+                                          {String.fromCharCode(65 + item.selectedIndex)}. 
                                           <MathText text={item.selectedAnswer || 'No answer selected'} inline />
                                         </>
                                       ) : 'Not answered'}
@@ -471,7 +471,7 @@ export default function ExamRoom() {
                                   <div className="rounded-xl bg-white border border-green-200 p-4">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-green-600 mb-1">Correct answer</p>
                                     <p className="text-gray-900 font-medium">
-                                      {String.fromCharCode(65 + item.correctIndex)}.{` `}
+                                      {String.fromCharCode(65 + item.correctIndex)}. 
                                       <MathText text={item.correctAnswer || 'Unavailable'} inline />
                                     </p>
                                   </div>
@@ -510,7 +510,7 @@ export default function ExamRoom() {
                                 <p className="text-gray-900 font-medium">
                                   {item.selectedIndex !== undefined ? (
                                     <>
-                                      {String.fromCharCode(65 + item.selectedIndex)}.{` `}
+                                      {String.fromCharCode(65 + item.selectedIndex)}. 
                                       <MathText text={item.selectedAnswer || 'No answer selected'} inline />
                                     </>
                                   ) : 'Not answered'}
@@ -519,7 +519,7 @@ export default function ExamRoom() {
                               <div className="rounded-xl bg-white border border-green-200 p-4">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-green-600 mb-1">Correct answer</p>
                                 <p className="text-gray-900 font-medium">
-                                  {String.fromCharCode(65 + item.correctIndex)}.{` `}
+                                  {String.fromCharCode(65 + item.correctIndex)}. 
                                   <MathText text={item.correctAnswer || 'Unavailable'} inline />
                                 </p>
                               </div>

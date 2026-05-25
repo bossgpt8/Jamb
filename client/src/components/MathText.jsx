@@ -31,12 +31,12 @@ function parseMathSegments(text) {
   while (cursor < source.length) {
     const next = findNextDelimiter(source, cursor)
     if (!next) {
-      segments.push({ type: 'text', value: source.slice(cursor) })
+      segments.push({ type: 'text', value: source.slice(cursor), start: cursor, end: source.length })
       break
     }
 
     if (next.index > cursor) {
-      segments.push({ type: 'text', value: source.slice(cursor, next.index) })
+      segments.push({ type: 'text', value: source.slice(cursor, next.index), start: cursor, end: next.index })
     }
 
     const { delimiter } = next
@@ -44,7 +44,7 @@ function parseMathSegments(text) {
     const end = source.indexOf(delimiter.close, start)
 
     if (end === -1) {
-      segments.push({ type: 'text', value: source.slice(next.index) })
+      segments.push({ type: 'text', value: source.slice(next.index), start: next.index, end: source.length })
       break
     }
 
@@ -52,9 +52,9 @@ function parseMathSegments(text) {
     const raw = source.slice(next.index, end + delimiter.close.length)
 
     if (!expression.trim()) {
-      segments.push({ type: 'text', value: raw })
+      segments.push({ type: 'text', value: raw, start: next.index, end: end + delimiter.close.length })
     } else {
-      segments.push({ type: 'math', value: expression, display: delimiter.display, raw })
+      segments.push({ type: 'math', value: expression, display: delimiter.display, raw, start: next.index, end: end + delimiter.close.length })
     }
 
     cursor = end + delimiter.close.length
@@ -64,8 +64,11 @@ function parseMathSegments(text) {
 }
 
 function renderMath(expression, displayMode) {
+  const sanitized = String(expression).replace(/[\u0000-\u001F\u007F]/g, '').trim()
+  if (!sanitized || sanitized.length > 1000) return null
+
   try {
-    return katex.renderToString(expression, {
+    return katex.renderToString(sanitized, {
       throwOnError: false,
       displayMode,
       strict: false,
@@ -84,9 +87,11 @@ export default function MathText({ text, inline = false, className = '' }) {
   return (
     <Tag className={tagClass}>
       {segments.map((segment, index) => {
+        const key = `${segment.type}-${segment.start ?? index}-${segment.end ?? index}`
+
         if (segment.type === 'text') {
           return (
-            <span key={`txt-${index}`} className="whitespace-pre-wrap">
+            <span key={key} className="whitespace-pre-wrap">
               {segment.value}
             </span>
           )
@@ -95,7 +100,7 @@ export default function MathText({ text, inline = false, className = '' }) {
         const html = renderMath(segment.value, segment.display)
         if (!html) {
           return (
-            <span key={`raw-${index}`} className="whitespace-pre-wrap">
+            <span key={key} className="whitespace-pre-wrap">
               {segment.raw}
             </span>
           )
@@ -103,7 +108,7 @@ export default function MathText({ text, inline = false, className = '' }) {
 
         return (
           <span
-            key={`math-${index}`}
+            key={key}
             className={segment.display ? 'math-display' : 'math-inline'}
             dangerouslySetInnerHTML={{ __html: html }}
           />
