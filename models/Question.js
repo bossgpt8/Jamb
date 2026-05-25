@@ -15,6 +15,7 @@ const questionSchema = new mongoose.Schema({
 }, { timestamps: true, strict: false }); // strict: false allows any extra fields your docs may have
 
 questionSchema.index({ subject: 1 });
+questionSchema.index({ subject: 1, year: 1, _id: 1 });
 
 // Explicitly use 'questions' collection
 // IMPORTANT: Your MONGODB_URI must point to the 'jambquestion' database, e.g.:

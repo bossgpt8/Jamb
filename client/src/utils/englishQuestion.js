@@ -7,6 +7,7 @@ const ENGLISH_SORT_RULES = [
 ]
 
 const FOCUS_CUE = /\b(nearest|closest|same|similar|synonym|opposite|antonym|meaning|replace|substitute)\b/i
+const MAX_TARGET_TEXT_LENGTH = 80
 
 function isEnglishSubject(subject) {
   const value = String(subject || '').toLowerCase().trim()
@@ -66,7 +67,7 @@ function inferFocusSpan(text) {
   if (!source) return null
   if (!FOCUS_CUE.test(source)) return null
 
-  const quoted = source.match(/["“']([^"”']{2,80})["”']/)
+  const quoted = source.match(new RegExp(`["“']([^"”']{2,${MAX_TARGET_TEXT_LENGTH}})["”']`))
   if (quoted) {
     const focused = quoted[1].trim()
     if (focused) {

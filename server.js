@@ -15,6 +15,26 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(path.join(__dirname)));
 
+const QUESTION_ROUTE_WINDOW_MS = 60 * 1000;
+const QUESTION_ROUTE_MAX_REQUESTS = 120;
+const questionRouteHits = new Map();
+
+function applyQuestionRouteRateLimit(req, res, next) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const key = forwarded || req.ip || 'unknown';
+  const now = Date.now();
+  const bucket = questionRouteHits.get(key) || [];
+  const recentHits = bucket.filter(ts => now - ts < QUESTION_ROUTE_WINDOW_MS);
+
+  if (recentHits.length >= QUESTION_ROUTE_MAX_REQUESTS) {
+    return res.status(429).json({ success: false, error: 'Too many requests. Please try again shortly.' });
+  }
+
+  recentHits.push(now);
+  questionRouteHits.set(key, recentHits);
+  next();
+}
+
 // Connect to MongoDB on startup
 connectDB().catch((err) => {
   console.error('❌ MongoDB connection failed:', err.message);
@@ -785,7 +805,7 @@ function isEnglishSubject(value) {
 }
 
 // GET /api/questions?subject=english&limit=20
-app.get('/api/questions', async (req, res) => {
+app.get('/api/questions', applyQuestionRouteRateLimit, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { subject, limit = 20, year, topic } = req.query;
 
@@ -816,7 +836,7 @@ app.get('/api/questions', async (req, res) => {
 });
 
 // GET /api/questions/exam?subjects=english,mathematics,physics,chemistry
-app.get('/api/questions/exam', async (req, res) => {
+app.get('/api/questions/exam', applyQuestionRouteRateLimit, async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   const { subjects } = req.query;
 
