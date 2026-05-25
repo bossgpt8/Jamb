@@ -6,6 +6,7 @@ const DELIMITERS = [
   { open: '\\(', close: '\\)', display: false },
   { open: '$', close: '$', display: false }
 ]
+const MAX_EXPRESSION_LENGTH = 1000
 
 function findNextDelimiter(source, fromIndex) {
   let next = null
@@ -65,7 +66,7 @@ function parseMathSegments(text) {
 
 function renderMath(expression, displayMode) {
   const sanitized = String(expression).replace(/[\u0000-\u001F\u007F]/g, '').trim()
-  if (!sanitized || sanitized.length > 1000) return null
+  if (!sanitized || sanitized.length > MAX_EXPRESSION_LENGTH) return null
 
   try {
     return katex.renderToString(sanitized, {
