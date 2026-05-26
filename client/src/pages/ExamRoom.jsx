@@ -70,6 +70,8 @@ export default function ExamRoom() {
   useEffect(() => {
     if (loading) return
 
+    document.body.classList.add('exam-protected')
+
     const triggerViolation = (reason) => {
       if (doneRef.current) return
       if (showSubmitConfirmRef.current) return
@@ -127,16 +129,39 @@ export default function ExamRoom() {
       if (!doneRef.current) e.preventDefault()
     }
 
+    const handleSelectStart = (e) => {
+      if (doneRef.current) return
+      if (e.target.closest('input, textarea, [contenteditable="true"]')) return
+      e.preventDefault()
+    }
+
+    const originalGetDisplayMedia = navigator.mediaDevices?.getDisplayMedia
+    if (originalGetDisplayMedia && navigator.mediaDevices) {
+      navigator.mediaDevices.getDisplayMedia = async (...args) => {
+        if (!doneRef.current) {
+          triggerViolation('Screen recording attempt was blocked.')
+          throw new Error('Screen recording is not allowed during exam.')
+        }
+        return originalGetDisplayMedia.apply(navigator.mediaDevices, args)
+      }
+    }
+
     document.addEventListener('visibilitychange', handleVisibility)
     document.addEventListener('keydown', handleKeyDown, true)
     document.addEventListener('keyup', handleKeyUp, true)
     document.addEventListener('contextmenu', handleContextMenu)
+    document.addEventListener('selectstart', handleSelectStart, true)
 
     return () => {
+      document.body.classList.remove('exam-protected')
       document.removeEventListener('visibilitychange', handleVisibility)
       document.removeEventListener('keydown', handleKeyDown, true)
       document.removeEventListener('keyup', handleKeyUp, true)
       document.removeEventListener('contextmenu', handleContextMenu)
+      document.removeEventListener('selectstart', handleSelectStart, true)
+      if (originalGetDisplayMedia && navigator.mediaDevices) {
+        navigator.mediaDevices.getDisplayMedia = originalGetDisplayMedia
+      }
     }
   }, [loading])
 
