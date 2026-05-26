@@ -192,7 +192,11 @@ class ViewportManager {
             /* Optimized calculator for desktop */
             .desktop-exam-view .calculator-container {
                 width: 320px;
-                max-height: 60vh;
+                max-height: calc(100vh - 96px);
+            }
+
+            .desktop-exam-view .calculator-body {
+                min-height: 0;
             }
 
             /* Question navigator grid - 2 columns on desktop */

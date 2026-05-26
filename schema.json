@@ -3,8 +3,8 @@
   "@type": "EducationalOrganization",
   "name": "JambGenius",
   "description": "Nigeria's leading JAMB exam preparation platform with mock exams, practice questions, and study materials",
-  "url": "https://jambgenius.vercel.app",
-  "logo": "https://jambgenius.vercel.app/logo.png",
+  "url": "https://jambgenius.app",
+  "logo": "https://jambgenius.app/logo.png",
   "sameAs": [
     "https://www.facebook.com/jambgenius",
     "https://twitter.com/jambgenius"

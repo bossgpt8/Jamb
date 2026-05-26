@@ -10,6 +10,18 @@ class Calculator {
         this.createCalculator();
     }
 
+    destroy() {
+        const existingCalculator = document.getElementById('calculator');
+        if (existingCalculator) {
+            existingCalculator.remove();
+        }
+
+        const toggleButton = document.querySelector('.calculator-toggle');
+        if (toggleButton) {
+            toggleButton.remove();
+        }
+    }
+
     createCalculator() {
         const calculatorHTML = `
             <div id="calculator" class="calculator-container" style="display: none;">
@@ -89,7 +101,7 @@ class Calculator {
                     bottom: 20px;
                     right: 20px;
                     width: 280px;
-                    max-height: 50vh;
+                    max-height: calc(100vh - 96px);
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     border-radius: 16px;
                     box-shadow: 0 20px 60px rgba(0,0,0,0.3);
@@ -157,6 +169,7 @@ class Calculator {
                     padding: 12px;
                     background: white;
                     flex: 1;
+                    min-height: 0;
                     overflow-y: auto;
                     display: flex;
                     flex-direction: column;
@@ -204,6 +217,7 @@ class Calculator {
                     display: grid;
                     grid-template-columns: repeat(4, 1fr);
                     gap: 6px;
+                    padding-bottom: 4px;
                 }
 
                 .calc-btn {
@@ -312,7 +326,7 @@ class Calculator {
                     .calculator-container {
                         width: calc(100vw - 32px) !important;
                         max-width: calc(100vw - 32px) !important;
-                        max-height: 50vh;
+                        max-height: calc(100vh - 96px);
                         bottom: 16px;
                         right: 16px;
                         left: 16px;
@@ -321,6 +335,7 @@ class Calculator {
 
                     .calculator-body {
                         overflow-y: auto;
+                        min-height: 0;
                         max-height: 100%;
                     }
 
@@ -702,6 +717,17 @@ class Calculator {
 
 // Initialize calculator on subjects that need it
 function initCalculatorForSubject() {
+    const currentPath = window.location.pathname.toLowerCase();
+    const isCalculatorRoute = currentPath.startsWith('/practice') || currentPath.startsWith('/exam');
+
+    if (!isCalculatorRoute) {
+        if (window.__jambCalculatorInstance) {
+            window.__jambCalculatorInstance.destroy();
+            window.__jambCalculatorInstance = null;
+        }
+        return;
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const subject = urlParams.get('subject');
     const subjects = urlParams.get('subjects');
@@ -739,13 +765,46 @@ function initCalculatorForSubject() {
     
     // Initialize calculator if needed
     if (needsCalculator) {
-        new Calculator();
+        if (!window.__jambCalculatorInstance) {
+            window.__jambCalculatorInstance = new Calculator();
+        }
+    } else if (window.__jambCalculatorInstance) {
+        window.__jambCalculatorInstance.destroy();
+        window.__jambCalculatorInstance = null;
     }
+}
+
+function bindCalculatorRouteListeners() {
+    if (window.__jambCalculatorRouteListenersBound) return;
+    window.__jambCalculatorRouteListenersBound = true;
+
+    const notifyRouteChange = () => initCalculatorForSubject();
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    history.pushState = function (...args) {
+        const result = originalPushState.apply(this, args);
+        window.dispatchEvent(new Event('jamb-locationchange'));
+        return result;
+    };
+
+    history.replaceState = function (...args) {
+        const result = originalReplaceState.apply(this, args);
+        window.dispatchEvent(new Event('jamb-locationchange'));
+        return result;
+    };
+
+    window.addEventListener('popstate', notifyRouteChange);
+    window.addEventListener('jamb-locationchange', notifyRouteChange);
 }
 
 // Auto-initialize when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initCalculatorForSubject);
+    document.addEventListener('DOMContentLoaded', () => {
+        bindCalculatorRouteListeners();
+        initCalculatorForSubject();
+    });
 } else {
+    bindCalculatorRouteListeners();
     initCalculatorForSubject();
 }
