@@ -9,7 +9,7 @@ Disallow: /node_modules/
 Disallow: /api/
 Disallow: /admin/
 
-Sitemap: https://jambgenius.vercel.app/sitemap.xml
+Sitemap: https://jambgenius.app/sitemap.xml
 
 # Google bot specific
 User-agent: Googlebot
