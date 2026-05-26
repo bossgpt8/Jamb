@@ -176,7 +176,7 @@ class Calculator {
                 }
 
                 .display-history {
-                    font-size: 9px;
+                    font-size: 11px;
                     color: #6c757d;
                     min-height: 12px;
                     margin-bottom: 4px;
@@ -578,9 +578,79 @@ class Calculator {
     evaluate(expression) {
         // Replace × and ÷ with * and /
         expression = expression.replace(/×/g, '*').replace(/÷/g, '/');
-        
-        // Safe evaluation using Function constructor
-        return Function('"use strict"; return (' + expression + ')')();
+
+        // Accept only calculator-safe characters
+        if (!/^[0-9+\-*/%.()\s]+$/.test(expression)) {
+            throw new Error('Invalid expression');
+        }
+
+        const tokens = expression.match(/\d*\.?\d+|[()+\-*/%]/g) || [];
+        let index = 0;
+
+        const currentToken = () => tokens[index];
+        const consumeToken = () => tokens[index++];
+
+        const parseExpression = () => {
+            let value = parseTerm();
+            while (currentToken() === '+' || currentToken() === '-') {
+                const operator = consumeToken();
+                const right = parseTerm();
+                value = operator === '+' ? value + right : value - right;
+            }
+            return value;
+        };
+
+        const parseTerm = () => {
+            let value = parseFactor();
+            while (currentToken() === '*' || currentToken() === '/' || currentToken() === '%') {
+                const operator = consumeToken();
+                const right = parseFactor();
+                if (operator === '*') value *= right;
+                if (operator === '/') value /= right;
+                if (operator === '%') value %= right;
+            }
+            return value;
+        };
+
+        const parseFactor = () => {
+            const token = currentToken();
+            if (token === '+' || token === '-') {
+                consumeToken();
+                const value = parseFactor();
+                return token === '-' ? -value : value;
+            }
+
+            if (token === '(') {
+                consumeToken();
+                const value = parseExpression();
+                if (currentToken() !== ')') {
+                    throw new Error('Mismatched parentheses');
+                }
+                consumeToken();
+                return value;
+            }
+
+            if (token === undefined || token === ')') {
+                throw new Error('Invalid expression');
+            }
+
+            const numericValue = Number(consumeToken());
+            if (!Number.isFinite(numericValue)) {
+                throw new Error('Invalid number');
+            }
+            return numericValue;
+        };
+
+        if (tokens.length === 0) {
+            throw new Error('Empty expression');
+        }
+
+        const result = parseExpression();
+        if (index !== tokens.length) {
+            throw new Error('Invalid expression');
+        }
+
+        return result;
     }
 
     formatNumber(num) {
