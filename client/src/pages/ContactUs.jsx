@@ -6,6 +6,13 @@ export default function ContactUs() {
   const [form, setForm] = useState({ name: '', email: '', subject: '', message: '' })
   const [sent, setSent] = useState(false)
   const [sending, setSending] = useState(false)
+  const contactItems = [
+    { iconClass: 'fas fa-envelope', iconBgClass: 'bg-blue-100', iconTextClass: 'text-blue-600', label: 'Email', value: 'osanisrael2@gmail.com', href: 'mailto:osanisrael2@gmail.com' },
+    { iconClass: 'fas fa-comments', iconBgClass: 'bg-green-100', iconTextClass: 'text-green-600', label: 'Community Chat', value: 'Chat with our community', onClick: () => navigate('/community') },
+    { iconClass: 'fab fa-whatsapp', iconBgClass: 'bg-green-100', iconTextClass: 'text-green-600', label: 'WhatsApp Support', value: '+2349164898577', href: 'https://wa.me/2349164898577' },
+    { iconClass: 'fas fa-phone', iconBgClass: 'bg-blue-100', iconTextClass: 'text-blue-600', label: 'Call Support', value: '+2349164898577', href: 'tel:+2349164898577' },
+    { iconClass: 'fas fa-clock', iconBgClass: 'bg-purple-100', iconTextClass: 'text-purple-600', label: 'Response Time', value: 'Within 24 hours' },
+  ]
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -82,21 +89,52 @@ export default function ContactUs() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Contact Information</h2>
             <div className="space-y-4">
-              {[
-                { icon: 'fa-envelope', color: 'blue', label: 'Email', value: 'support@jambgenius.com' },
-                { icon: 'fa-comments', color: 'green', label: 'Community Chat', value: 'Chat with our community' },
-                { icon: 'fa-clock', color: 'purple', label: 'Response Time', value: 'Within 24 hours' },
-              ].map((c, i) => (
-                <div key={i} className="flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
-                  <div className={`w-12 h-12 bg-${c.color}-100 rounded-xl flex items-center justify-center`}>
-                    <i className={`fas ${c.icon} text-${c.color}-600 text-xl`}></i>
+              {contactItems.map((c, i) => {
+                const content = (
+                  <>
+                    <div className={`w-12 h-12 ${c.iconBgClass} rounded-xl flex items-center justify-center`}>
+                      <i className={`${c.iconClass} ${c.iconTextClass} text-xl`}></i>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900">{c.label}</p>
+                      <p className="text-gray-600 text-sm">{c.value}</p>
+                    </div>
+                  </>
+                )
+
+                if (c.href) {
+                  return (
+                    <a
+                      key={i}
+                      href={c.href}
+                      target={c.href.startsWith('http') ? '_blank' : undefined}
+                      rel={c.href.startsWith('http') ? 'noreferrer' : undefined}
+                      className="flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                    >
+                      {content}
+                    </a>
+                  )
+                }
+
+                if (c.onClick) {
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={c.onClick}
+                      className="w-full flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm text-left hover:shadow-md hover:-translate-y-0.5 transition-all"
+                    >
+                      {content}
+                    </button>
+                  )
+                }
+
+                return (
+                  <div key={i} className="flex items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
+                    {content}
                   </div>
-                  <div>
-                    <p className="font-semibold text-gray-900">{c.label}</p>
-                    <p className="text-gray-600 text-sm">{c.value}</p>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <div className="mt-6 bg-blue-50 rounded-xl p-6">
               <h3 className="font-bold text-gray-900 mb-2">Quick Help</h3>
